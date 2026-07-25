@@ -525,10 +525,10 @@
 				</ScrollChild>
 			</ScrollFrame>
 
-			<Button name="Atr_SellBrowser_Scan" inherits="UIPanelButtonTemplate" text="Scan Prices" hidden="true">
-				<Size><AbsDimension x="170" y="18"/></Size>
+			<Button name="Atr_SellBrowser_Scan" inherits="UIPanelButtonTemplate" text="Scan Inventory" hidden="true">
+				<Size><AbsDimension x="85" y="18"/></Size>
 				<Anchors>
-					<Anchor point="BOTTOMLEFT" relativeTo="Atr_SellBrowser" relativePoint="TOPLEFT"><Offset><AbsDimension x="0" y="2"/></Offset></Anchor>
+					<Anchor point="TOPLEFT" relativeTo="Atr_SellBrowser" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-4"/></Offset></Anchor>
 				</Anchors>
 				<Scripts>
 					<OnClick>Atr_SB_ScanPrices();</OnClick>

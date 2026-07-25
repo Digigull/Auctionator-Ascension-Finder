@@ -1858,7 +1858,7 @@ function Atr_SB_BagUpdate()
     end
 end
 
--- SELL BROWSER: "Scan Prices" --------------------------------------
+-- SELL BROWSER: "Scan Inventory" --------------------------------------
 -- Fetch fresh CURRENT AH prices for the items shown in the inventory browser,
 -- reusing the Finder scan engine one item name at a time.  Each name's scan
 -- feeds gAtr_ScanDB via the ordinary Fdr_PriceDB_Update path, so afterwards the
@@ -1866,7 +1866,7 @@ end
 
 local function Atr_SB_ScanSetButton(text, enabled)
     if (not Atr_SellBrowser_Scan) then return; end
-    Atr_SellBrowser_Scan:SetText(text or "Scan Prices");
+    Atr_SellBrowser_Scan:SetText(text or "Scan Inventory");
     if (enabled == false) then Atr_SellBrowser_Scan:Disable(); else Atr_SellBrowser_Scan:Enable(); end
 end
 
@@ -1882,7 +1882,7 @@ function Atr_SB_ScanCancel()
     gSB_Scanning = false;
     gSB_ScanNames = {};
     gSB_ScanIdx = 0;
-    Atr_SB_ScanSetButton("Scan Prices");
+    Atr_SB_ScanSetButton("Scan Inventory");
     if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
 end
 
@@ -1890,12 +1890,12 @@ local function Atr_SB_ScanFinish()
     gSB_Scanning = false;
     gSB_ScanNames = {};
     gSB_ScanIdx = 0;
-    Atr_SB_ScanSetButton("Scan Prices");
+    Atr_SB_ScanSetButton("Scan Inventory");
     if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
     -- Do not fail silently: if the price feed is off, a "Scan Prices" run stores
     -- nothing, and the only symptom would be items never leaving "Unpriced".
     if (gSB_ScanFeedOff and DEFAULT_CHAT_FRAME) then
-        DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Scan Prices needs the Finder \"Prices\" option enabled to store results (Finder tab > options).");
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Scan Inventory needs the Finder \"Prices\" option enabled to store results (Finder tab > options).");
     end
     gSB_ScanFeedOff = false;
 end
