@@ -12,8 +12,8 @@ The loop:
 
 1. Make changes, commit, and push to the feature branch
    (`claude/auctionator-addon-repo-c1mm7s`).
-2. Pushing produces a pull request; the user reviews and approves/merges it
-   into `main`.
+2. **Open the PR explicitly** (e.g. the `create_pull_request` GitHub tool),
+   then the user reviews and approves/merges it into `main`.
 3. The change is only live once merged into `main`.
 
 Rules that follow from this:
@@ -21,7 +21,7 @@ Rules that follow from this:
 - **A merged PR is finished.** It cannot pick up new commits. Never stack
   new work on already-merged history.
 - **Before starting the next change, sync to the merged `main`** and restart
-  the feature branch from it (same branch name), so the next push produces a
+  the feature branch from it (same branch name), so the next change opens a
   fresh PR:
   ```
   git fetch origin main
@@ -32,8 +32,17 @@ Rules that follow from this:
 - **After the user says a PR is merged, re-sync before touching code** — the
   user may already be testing that exact version, so local and remote must
   match before the next edit.
-- Do not open a PR manually; pushing to the branch is enough. Only open one
-  if the user explicitly asks.
+- **Pushing the branch is NOT enough to create a PR.** A push only updates
+  the branch (GitHub prints a "create a pull request" link but opens
+  nothing). Once a change is ready, open the PR explicitly with the
+  `create_pull_request` GitHub tool — otherwise the user has nothing to
+  approve.
+- **Do not amend/rebase merge commits already on `main`.** GitHub's
+  "Merge pull request #N" commits are authored by the user and show as
+  "Unverified" — that is expected and cosmetic. Rewriting them would
+  diverge from `origin/main` and violate the no-rewriting-merged-history
+  rule. Our own commits are authored `Claude <noreply@anthropic.com>` and
+  are what should be verified.
 
 ## Project overview
 
