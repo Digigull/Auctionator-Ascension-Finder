@@ -46,3 +46,25 @@ architecture and testing notes (`FINDER-ARCHITECTURE.md`,
 - Tests: plain Lua 5.1 mock-WoW harness. Workflow: patch →
   `luac5.1 -p <file>` (syntax check) → run all harnesses. See
   `Old Docs/README-TESTS.md`.
+
+## Project history — why we're on Claude Code now
+
+This project originally ran inside Claude's **Projects** feature. Over time
+that project became **bogged down and slow to the point of being unreliable**
+— responses crawled. Rather than keep fighting it, the user started fresh
+here in **Claude Code** with a clean repo.
+
+Consequences and things to keep in mind:
+
+- **The addon folders here are the user's LIVE copy** and are the source of
+  truth — they are up to date, not a stale export. Trust them over anything
+  in `Old Docs/`.
+- **`Old Docs/` is reference material carried over from the old project.**
+  It captures architecture/testing/client notes but may lag the live code;
+  when the two disagree, the code wins.
+- **Likely cause of the slowdown was context bloat** — a very long-lived
+  conversation accumulating the entire architecture, big scan dumps, and
+  history in-context. Practical takeaway for this repo: keep durable
+  knowledge in committed docs (`README.md`, `CLAUDE.md`, `Old Docs/`) and
+  lean on those instead of carrying everything in the conversation, so this
+  workspace stays fast.
