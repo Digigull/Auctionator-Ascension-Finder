@@ -201,6 +201,10 @@ local gHistoryItemList = {};
 local gSB_Visible = false;        -- whether the inventory browser is visible on the SELL tab
 local gSB_Inited  = false;        -- first-time initialization when SELL tab is shown
 local gSB_Widgets = {};           -- dynamic frames created under Atr_SB_Content
+local gSB_Scanning   = false;     -- a "Scan Prices" run over the inventory is in progress
+local gSB_ScanNames  = {};        -- distinct item names queued for the current scan
+local gSB_ScanIdx    = 0;         -- index into gSB_ScanNames of the name being scanned
+local gSB_ScanFeedOff = false;    -- a scan finished but the price feed was disabled
 
 -- SELL tab enlarged layout state
 local gSellLayoutExpandedApplied = false;
@@ -1306,6 +1310,7 @@ function Atr_AuctionFrameTab_OnClick (self, index, down)
 			-- Hide inventory UI when not on SELL tab and reset layout
 			if (Atr_SellBrowser_Toggle) then Atr_SellBrowser_Toggle:Hide(); end
 			if (Atr_SellBrowser) then Atr_SellBrowser:Hide(); end
+			if (Atr_SellBrowser_Scan) then Atr_SellBrowser_Scan:Hide(); end
 			if (Atr_SellControls) then Atr_SellControls:Hide(); end
 			if (Atr_ResetSellExpandedLayout) then Atr_ResetSellExpandedLayout(); end
 		end
@@ -1656,7 +1661,35 @@ function Atr_SB_Build()
 
     Atr_SB_Clear();
 
-    local categories = {};
+    -- Within each item-type category, items are further split by which selling
+    -- method is worth the MOST: Auction (current AH price), Vendor, or
+    -- Disenchant.  This mirrors the green "best price" highlight in the tooltip
+    -- (Atr_TipBestPrice) but deliberately drops AH median -- a seller about to
+    -- list cares about the current price, not a rolling average.  An item with
+    -- no known AH price goes to "Unpriced" until a scan fills one, rather than
+    -- being mis-bucketed as Vendor/Disenchant on incomplete data.
+    local M_AUCTION, M_VENDOR, M_DE, M_UNPRICED = "Auction", "Vendor", "Disenchant", "Unpriced";
+    local METHOD_ORDER = { M_AUCTION, M_VENDOR, M_DE, M_UNPRICED };
+
+    local function Atr_SB_BestMethod(link, name)
+        local ah = (name and Atr_GetAuctionPrice) and Atr_GetAuctionPrice(name) or nil;
+        ah = tonumber(ah) or 0;
+        if (ah <= 0) then return M_UNPRICED; end     -- not scanned / no listings yet
+
+        local vendor = Atr_GetSellValue and Atr_GetSellValue(link) or select(11, GetItemInfo(link));
+        vendor = tonumber(vendor) or 0;
+        local de = Atr_GetDisenchantValue and Atr_GetDisenchantValue(link) or nil;
+        de = tonumber(de) or 0;
+
+        -- highest wins; on a tie the AH is preferred (it is the point of a sell
+        -- tool), then Disenchant over Vendor.
+        local best, method = vendor, M_VENDOR;
+        if (de > best) then best, method = de, M_DE; end
+        if (ah >= best) then best, method = ah, M_AUCTION; end
+        return method;
+    end
+
+    local categories = {};   -- categories[cat] = { count, methods = { [m] = { count, items } } }
 
     for bag = 0, NUM_BAG_SLOTS do
         local numSlots = GetContainerNumSlots(bag) or 0;
@@ -1668,8 +1701,12 @@ function Atr_SB_Build()
                 local classIdx = sType and Atr_ItemType2AuctionClass(sType) or 0;
                 if (classIdx) then
                     local cat = sType or ZT("Other");
-                    if (not categories[cat]) then categories[cat] = { count = 0, items = {} }; end
-                    table.insert(categories[cat].items, { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1 });
+                    local method = Atr_SB_BestMethod(link, name);
+                    if (not categories[cat]) then categories[cat] = { count = 0, methods = {} }; end
+                    local mc = categories[cat].methods;
+                    if (not mc[method]) then mc[method] = { count = 0, items = {} }; end
+                    table.insert(mc[method].items, { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1 });
+                    mc[method].count = mc[method].count + (itemCount or 1);
                     categories[cat].count = categories[cat].count + (itemCount or 1);
                 end
             end
@@ -1695,24 +1732,34 @@ function Atr_SB_Build()
         return f;
     end
 
+    local function addSubHeader(text)
+        local f = Atr_SB_AddWidget(CreateFrame("Frame", nil, Atr_SB_Content));
+        f:SetSize(150, 14);
+        f:SetPoint("TOPLEFT", 14, y);
+        local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall");
+        fs:SetPoint("LEFT", 0, 0);
+        fs:SetText(text);
+        y = y - 15;
+        contentHeight = contentHeight + 15;
+        return f;
+    end
+
     local TILE = 28;
     local GAP  = 4;
+    local BASEX = 14;   -- indent tiles under the method sub-header
     local frameWidth = (Atr_SellBrowser and Atr_SellBrowser:GetWidth()) or 170;
-    local usableWidth = math.max(40, frameWidth - 12); -- padding
+    local usableWidth = math.max(40, frameWidth - BASEX - 8); -- padding
     local COLS = math.max(3, math.floor((usableWidth + GAP) / (TILE + GAP)));
 
-    for _, cat in ipairs(order) do
-        local info = categories[cat];
-        addHeader(string.format("%s (%d)", cat, info.count));
-
+    local function renderTiles(items)
         local col = 0;
         local rowStartY = y;
-        for _, it in ipairs(info.items) do
+        for _, it in ipairs(items) do
             if (col == 0) then rowStartY = y; end
 
             local btn = Atr_SB_AddWidget(CreateFrame("Button", nil, Atr_SB_Content));
             btn:SetSize(TILE, TILE);
-            btn:SetPoint("TOPLEFT", 6 + col*(TILE+GAP), rowStartY);
+            btn:SetPoint("TOPLEFT", BASEX + col*(TILE+GAP), rowStartY);
             btn.bagID  = it.bag;
             btn.slotID = it.slot;
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp");
@@ -1740,6 +1787,21 @@ function Atr_SB_Build()
             y = y - (TILE + GAP);
             contentHeight = contentHeight + TILE + GAP;
         end
+    end
+
+    for _, cat in ipairs(order) do
+        local info = categories[cat];
+        addHeader(string.format("%s (%d)", cat, info.count));
+
+        for _, m in ipairs(METHOD_ORDER) do
+            local grp = info.methods[m];
+            if (grp and #grp.items > 0) then
+                addSubHeader(string.format("%s (%d)", m, grp.count));
+                renderTiles(grp.items);
+                y = y - 2;
+                contentHeight = contentHeight + 2;
+            end
+        end
 
         y = y - 4;
         contentHeight = contentHeight + 4;
@@ -1758,6 +1820,7 @@ function Atr_SB_Toggle()
     else
         if (Atr_SellBrowser_Toggle) then Atr_SellBrowser_Toggle:SetText("Inventory"); end
         if (Atr_SellBrowser) then Atr_SellBrowser:Hide(); end
+        if (Atr_SellBrowser_Scan) then Atr_SellBrowser_Scan:Hide(); end
         if (Atr_SellControls) then Atr_SellControls:Show(); end
     end
 end
@@ -1793,6 +1856,107 @@ function Atr_SB_BagUpdate()
     if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then
         Atr_SB_Build();
     end
+end
+
+-- SELL BROWSER: "Scan Prices" --------------------------------------
+-- Fetch fresh CURRENT AH prices for the items shown in the inventory browser,
+-- reusing the Finder scan engine one item name at a time.  Each name's scan
+-- feeds gAtr_ScanDB via the ordinary Fdr_PriceDB_Update path, so afterwards the
+-- browser rebuild re-buckets items out of "Unpriced".  A second click cancels.
+
+local function Atr_SB_ScanSetButton(text, enabled)
+    if (not Atr_SellBrowser_Scan) then return; end
+    Atr_SellBrowser_Scan:SetText(text or "Scan Prices");
+    if (enabled == false) then Atr_SellBrowser_Scan:Disable(); else Atr_SellBrowser_Scan:Enable(); end
+end
+
+-- Global: the Finder cancel path calls this so its per-name chain, which rides
+-- gFdr_OnFinish, does not strand the button in a "scanning" state.  Resets the
+-- Sell-side state ONLY -- the engine teardown is the caller's job.
+function Atr_SB_ScanRunning()
+    return gSB_Scanning;
+end
+
+function Atr_SB_ScanCancel()
+    if (not gSB_Scanning) then return; end
+    gSB_Scanning = false;
+    gSB_ScanNames = {};
+    gSB_ScanIdx = 0;
+    Atr_SB_ScanSetButton("Scan Prices");
+    if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
+end
+
+local function Atr_SB_ScanFinish()
+    gSB_Scanning = false;
+    gSB_ScanNames = {};
+    gSB_ScanIdx = 0;
+    Atr_SB_ScanSetButton("Scan Prices");
+    if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
+    -- Do not fail silently: if the price feed is off, a "Scan Prices" run stores
+    -- nothing, and the only symptom would be items never leaving "Unpriced".
+    if (gSB_ScanFeedOff and DEFAULT_CHAT_FRAME) then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Scan Prices needs the Finder \"Prices\" option enabled to store results (Finder tab > options).");
+    end
+    gSB_ScanFeedOff = false;
+end
+
+function Atr_SB_ScanNext()
+    if (not gSB_Scanning) then return; end
+    gSB_ScanIdx = gSB_ScanIdx + 1;
+    if (gSB_ScanIdx > #gSB_ScanNames) then
+        Atr_SB_ScanFinish();
+        return;
+    end
+    Atr_SB_ScanSetButton(string.format("Cancel (%d/%d)", gSB_ScanIdx, #gSB_ScanNames));
+    local name = gSB_ScanNames[gSB_ScanIdx];
+    local ok = Atr_Finder_StartNameScan and Atr_Finder_StartNameScan(name, function(pAdd, pUpd, pSkip, pWhy)
+        if (pWhy == "off") then gSB_ScanFeedOff = true; end
+        Atr_SB_ScanNext();
+    end);
+    if (not ok) then
+        -- engine busy (a Finder or Full Scan owns the shared query channel)
+        Atr_SB_ScanFinish();
+        if (DEFAULT_CHAT_FRAME) then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Finish or cancel the current Finder scan first.");
+        end
+    end
+end
+
+function Atr_SB_ScanPrices()
+    -- second click while running = cancel (route through the Finder cancel so
+    -- the shared engine is torn down too; it calls back into Atr_SB_ScanCancel)
+    if (gSB_Scanning) then
+        if (Atr_Finder_CancelSearch) then Atr_Finder_CancelSearch(false); else Atr_SB_ScanCancel(); end
+        return;
+    end
+
+    if (not Atr_Finder_StartNameScan) then return; end   -- Finder not loaded
+
+    -- collect the DISTINCT sellable item names currently in bags (same filter
+    -- the browser build uses, so the scan set matches what is shown)
+    local names, seen = {}, {};
+    for bag = 0, NUM_BAG_SLOTS do
+        local numSlots = GetContainerNumSlots(bag) or 0;
+        for slot = 1, numSlots do
+            local _, _, _, quality, _, _, itemLink = GetContainerItemInfo(bag, slot);
+            local link = itemLink or GetContainerItemLink(bag, slot);
+            if (link and Atr_IsItemSellableOnAH(bag, slot, link, quality)) then
+                local name = GetItemInfo(link);
+                if (name and not seen[name]) then
+                    seen[name] = true;
+                    table.insert(names, name);
+                end
+            end
+        end
+    end
+
+    if (#names == 0) then return; end
+
+    gSB_ScanNames = names;
+    gSB_ScanIdx = 0;
+    gSB_ScanFeedOff = false;
+    gSB_Scanning = true;
+    Atr_SB_ScanNext();
 end
 
 -----------------------------------------
@@ -1954,6 +2118,7 @@ function Atr_Sell_EnsureBrowser ()
     if (Atr_SellBrowser) then
         gSB_Visible = true;
         Atr_SellBrowser:Show();
+        if (Atr_SellBrowser_Scan) then Atr_SellBrowser_Scan:Show(); end
     end
 end
 

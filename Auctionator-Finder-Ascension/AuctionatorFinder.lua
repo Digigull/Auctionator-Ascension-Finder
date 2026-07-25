@@ -2387,6 +2387,12 @@ function Atr_Finder_CancelSearch (showMsg)
 		Fdr_FS_Cancel (false);
 	end
 
+	-- Same problem for the Sell tab's "Scan Prices" driver: its per-name chain
+	-- rides gFdr_OnFinish, which we just cleared, so tell it to stop too.
+	if (Atr_SB_ScanRunning and Atr_SB_ScanRunning ()) then
+		Atr_SB_ScanCancel ();
+	end
+
 	return pAdd, pUpd;
 end
 
@@ -2451,6 +2457,64 @@ function Atr_Finder_StartQueueScan (specs, onFinish)
 	end
 
 	gFdr_SpecQueue		= specs;
+	gFdr_SpecIdx		= 1;
+	gFdr_State			= FDR_PREQUERY;
+	gFdr_QuerySentAt	= time();
+
+	gFdr_OnFinish = onFinish;
+
+	if (Atr_NewQuery) then
+		gFdr_Query = Atr_NewQuery();
+	else
+		gFdr_Query = nil;
+	end
+
+	if (Atr_Finder_SearchButton) then
+		Atr_Finder_SearchButton:SetText (FT("Cancel"));
+	end
+	Fdr_SetMessage (FT("Scanning..."));
+	if (Atr_Finder_Redisplay) then Atr_Finder_Redisplay (); end
+
+	return true;
+end
+
+
+-- FINDER_TAB: scan the AH for ONE exact item name and feed the price DB, for
+-- callers OUTSIDE the Finder tab (the Sell tab's "Scan Prices" button).
+-- Identical to Atr_Finder_StartQueueScan except the server-side NAME filter is
+-- KEPT instead of blanked, and the queue is a single all-class spec -- so the
+-- server returns just this item's listings and the ordinary Fdr_PriceDB_Update
+-- writes its lowest current buyout to gAtr_ScanDB[name].  onFinish fires with
+-- (pAdd, pUpd, pSkip, pWhy) exactly as for a queued scan.  The shared event
+-- frame is parented to UIParent, so this pages correctly while the user is on
+-- the Sell tab.  Returns false when the engine is already busy.
+function Atr_Finder_StartNameScan (name, onFinish)
+
+	if (type (name) ~= "string" or name == "") then return false; end
+	if (gFdr_State ~= FDR_NULL) then return false; end
+
+	Atr_Finder_CancelBuy ();
+	Atr_Finder_CancelGroup ();
+
+	gFdr_SearchText	= name;			-- the ONE difference from StartQueueScan
+	gFdr_MinLevel	= nil;
+	gFdr_MaxLevel	= nil;
+	gFdr_UsableOnly	= nil;
+
+	gFdr_Results		= {};
+	gFdr_Display		= {};
+	gFdr_Page			= 0;
+	gFdr_TotalPages		= 0;
+	gFdr_DupRetries		= 0;
+	gFdr_SkippedPages	= 0;
+	gFdr_CapHit			= false;
+	gFdr_WaitTicks		= 0;
+	gFdr_RetryHold		= 0;
+
+	-- one all-class spec: the server narrows by the name filter set above.
+	-- warned is pre-set for the same reason StartQueueScan does it -- no
+	-- confirmation dialog can be answered for a programmatic run.
+	gFdr_SpecQueue		= { { class = 0, subclass = 0, autoAccept = true, label = name, warned = true } };
 	gFdr_SpecIdx		= 1;
 	gFdr_State			= FDR_PREQUERY;
 	gFdr_QuerySentAt	= time();

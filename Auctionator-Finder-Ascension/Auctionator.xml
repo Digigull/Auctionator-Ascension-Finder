@@ -525,6 +525,19 @@
 				</ScrollChild>
 			</ScrollFrame>
 
+			<Button name="Atr_SellBrowser_Scan" inherits="UIPanelButtonTemplate" text="Scan Prices" hidden="true">
+				<Size><AbsDimension x="170" y="18"/></Size>
+				<Anchors>
+					<Anchor point="BOTTOMLEFT" relativeTo="Atr_SellBrowser" relativePoint="TOPLEFT"><Offset><AbsDimension x="0" y="2"/></Offset></Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>Atr_SB_ScanPrices();</OnClick>
+				</Scripts>
+				<NormalFont style="GameFontNormalSmall"/>
+				<HighlightFont style="GameFontHighlightSmall"/>
+				<DisabledFont style="GameFontDisableSmall"/>
+			</Button>
+
 			<Frame name="Atr_SellControls" hidden="true">
 				<Size><AbsDimension x="170" y="335"/></Size>
 				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="-193" y="-75"/></Offset></Anchor></Anchors>
