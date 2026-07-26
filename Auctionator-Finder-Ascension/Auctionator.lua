@@ -2273,7 +2273,7 @@ function Atr_Craft_Harvest()
         local _, skillType = GetTradeSkillInfo(i);
         if (skillType and skillType ~= "header") then
             local madeLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i) or nil;
-            local madeID   = madeLink and ItemID and tonumber(ItemID(madeLink)) or nil;
+            local madeID   = madeLink and ItemID and tonumber((ItemID(madeLink))) or nil;   -- extra parens: ItemID returns 3 values
             if (madeID) then
                 local made = 1;
                 if (GetTradeSkillNumMade) then
@@ -2287,7 +2287,7 @@ function Atr_Craft_Harvest()
                 for j = 1, numR do
                     local _, _, rcount = GetTradeSkillReagentInfo(i, j);
                     local rlink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(i, j) or nil;
-                    local rid   = rlink and ItemID and tonumber(ItemID(rlink)) or nil;
+                    local rid   = rlink and ItemID and tonumber((ItemID(rlink))) or nil;   -- extra parens: ItemID returns 3 values
                     if (rid) then
                         table.insert(reagents, { id = rid, count = tonumber(rcount) or 1 });
                     end
@@ -2318,7 +2318,7 @@ function Atr_Craft_GetCraftCost(link, name)
     if (type(link) == "number") then
         itemID = link;
     elseif (link and zc and zc.ItemIDfromLink) then
-        itemID = tonumber(zc.ItemIDfromLink(link));
+        itemID = tonumber((zc.ItemIDfromLink(link)));   -- extra parens: ItemIDfromLink returns 3 values
     end
     if (itemID) then rec = AUCTIONATOR_CRAFT_RECIPES[itemID]; end
 
