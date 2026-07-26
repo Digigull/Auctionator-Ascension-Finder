@@ -305,6 +305,84 @@ end
 
 -----------------------------------------
 
+-- FINDER_TAB: NPC (vendor-bought) trade-good prices -----------------------
+-- Some crafting reagents are bought FROM an NPC at a fixed price and sold in
+-- unlimited supply -- Empty Vial, Crystal Vial, Wooden Stock, thread, flux,
+-- dyes, spices, and so on.  For those the going cost is the NPC price, not
+-- whatever someone happens to relist them for on the AH, and their auction
+-- number just misleads the crafting-cost maths.
+--
+-- We can't ask the client "is item X sold by a vendor"; that's only knowable
+-- while a merchant window is open (GetMerchantItemInfo).  So we LEARN it: any
+-- Trade Goods item a merchant offers at UNLIMITED stock for a plain gold price
+-- is recorded in AUCTIONATOR_NPC_PRICES (account-wide) as itemID -> per-item
+-- NPC buy price.  Presence in that table is exactly "this trade good is
+-- normally sold by NPCs", and the value is its NPC price.  Coverage grows as
+-- vendors are visited; nothing here needs a curated item list.
+--
+-- Note the deliberate naming: the addon already says "Vendor" for the price an
+-- NPC pays YOU (the sell value from GetItemInfo).  This is the other
+-- direction -- what you PAY an NPC to buy it -- so it is called the NPC price
+-- throughout, never "vendor".
+
+function Atr_NPC_DB ()
+	if (type (AUCTIONATOR_NPC_PRICES) ~= "table") then AUCTIONATOR_NPC_PRICES = {}; end
+	return AUCTIONATOR_NPC_PRICES;
+end
+
+-- Per-item NPC buy price for a learned trade good, or nil if we've never seen
+-- it sold by a vendor.
+function Atr_GetNPCPrice (itemID)
+	itemID = tonumber (itemID);
+	if (itemID == nil or type (AUCTIONATOR_NPC_PRICES) ~= "table") then return nil; end
+	local p = AUCTIONATOR_NPC_PRICES[itemID];
+	if (type (p) == "number" and p > 0) then return p; end
+	return nil;
+end
+
+-- Walk the open merchant and learn every unlimited-stock, gold-priced Trade
+-- Goods item as an NPC-sold reagent.  Limited-stock or item/honor-cost slots
+-- are skipped: an unlimited gold price is what makes a reagent "normally sold
+-- by NPCs" and caps its real cost at the NPC price.
+function Atr_NPC_HarvestMerchant ()
+	if (type (GetMerchantNumItems) ~= "function" or type (GetMerchantItemInfo) ~= "function") then return; end
+	local total = GetMerchantNumItems () or 0;
+	if (total <= 0) then return; end
+
+	local db     = Atr_NPC_DB ();
+	local ItemID = (zc and zc.ItemIDfromLink) or nil;
+
+	for i = 1, total do
+		local _, _, price, quantity, numAvailable, _, _, extendedCost = GetMerchantItemInfo (i);
+		-- unlimited stock (numAvailable == -1), a real gold price, no item/token cost
+		if (price and price > 0 and not extendedCost and numAvailable == -1) then
+			local link   = GetMerchantItemLink and GetMerchantItemLink (i) or nil;
+			local itemID = link and ItemID and tonumber ((ItemID (link))) or nil;   -- extra parens: ItemID returns 3 values
+			if (itemID) then
+				local itemType = link and select (6, GetItemInfo (link)) or nil;
+				if (itemType == "Trade Goods") then
+					local q = tonumber (quantity) or 1;
+					if (q < 1) then q = 1; end
+					local unit = math.floor (price / q);
+					if (unit > 0) then db[itemID] = unit; end
+				end
+			end
+		end
+	end
+end
+
+-- Learn NPC prices whenever a merchant window opens or refreshes.  A dedicated
+-- frame keeps this off the core event dispatcher; guarded so the file still
+-- loads under a bare Lua interpreter for testing.
+if (type (CreateFrame) == "function") then
+	local f = CreateFrame ("Frame");
+	f:RegisterEvent ("MERCHANT_SHOW");
+	f:RegisterEvent ("MERCHANT_UPDATE");
+	f:SetScript ("OnEvent", function () Atr_NPC_HarvestMerchant (); end);
+end
+
+-----------------------------------------
+
 function Atr_GetMeanPrice (item)  -- itemName or itemID
 
 	local itemName;
@@ -1806,13 +1884,22 @@ local function ShowTipWithPricing (tip, link, num)
 	if (AUCTIONATOR_A_TIPS == 1) then auctionPrice	= Atr_GetAuctionPrice (itemName); end;
     if (AUCTIONATOR_A_TIPS == 1) then auctionMedianPrice = Atr_GetMeanPrice (itemName); end;
 
+	-- FINDER_TAB: NPC-sold trade good?  If we've learned this item from a vendor
+	-- (Atr_GetNPCPrice), its going cost is the fixed NPC price, so we show that
+	-- and suppress the misleading AH line rather than pricing it off the market.
+	local npcPrice = (itemID and Atr_GetNPCPrice) and Atr_GetNPCPrice (itemID) or nil;
+	local isNPCReagent = (npcPrice ~= nil and npcPrice > 0);
+	if (isNPCReagent) then
+		auctionPrice = nil; auctionMedianPrice = nil;		-- never show an AH price for a vendor-sold reagent
+	end
+
 	-- FINDER_TAB: flag when the auction figure is a suffix-variant estimate
 	-- rather than a real listing for this name -- i.e. Atr_GetAuctionPrice fell
 	-- back to Atr_GetAHVariantEstimate because the base name isn't listed
 	-- directly (random-suffix gear like the crafted "Dreamdust Slippers").  Only
 	-- then do we render it as "~... (est)" so an estimate never reads as exact.
 	local auctionIsEst, auctionEstCount = false, nil;
-	if (AUCTIONATOR_A_TIPS == 1 and auctionPrice
+	if (AUCTIONATOR_A_TIPS == 1 and not isNPCReagent and auctionPrice
 	    and not (gAtr_ScanDB and gAtr_ScanDB[itemName])
 	    and not (Atr_GetMostRecentSale and Atr_GetMostRecentSale (itemName))) then
 		local est, cnt = Atr_GetAHVariantEstimate (itemName);
@@ -1870,6 +1957,7 @@ local function ShowTipWithPricing (tip, link, num)
         if (auctionMedianPrice) then auctionMedianPrice = auctionMedianPrice * num; end;
 		if (vendorPrice)	then	vendorPrice  = vendorPrice  * num;	end;
 		if (dePrice)  		then	dePrice  	 = dePrice  * num;	end;
+		if (npcPrice)		then	npcPrice     = npcPrice     * num;	end;
 		xstring = "|cFFAAAAFF x"..num.."|r";
 	end;
 
@@ -1922,11 +2010,13 @@ local function ShowTipWithPricing (tip, link, num)
 	-- auction info
 
 	if (AUCTIONATOR_A_TIPS == 1) then
-		
+
 		-- FINDER_TAB: bonding is resolved with the candidates above (same call,
 		-- same gate) so the highlight and this branch agree by construction
-		if (isBOP) then
-			tip:AddDoubleLine (ZT("Auction")..xstring, "|cFFFFFFFF"..ZT("BOP").."  ");				
+		if (isNPCReagent) then		-- FINDER_TAB: vendor-sold reagent -> show the NPC price, never the AH
+			tip:AddDoubleLine (ZT("NPC price")..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (npcPrice));
+		elseif (isBOP) then
+			tip:AddDoubleLine (ZT("Auction")..xstring, "|cFFFFFFFF"..ZT("BOP").."  ");
 		elseif (isQuest) then
 			tip:AddDoubleLine (ZT("Auction")..xstring, "|cFFFFFFFF"..ZT("Quest Item").."  ");			
 		elseif (auctionVariant) then		-- FINDER_TAB: '*' = a verified price for this exact scale-variant

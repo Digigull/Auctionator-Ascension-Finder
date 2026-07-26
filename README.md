@@ -46,6 +46,16 @@ UI that trusts the AH API's level values.
   an open profession window) show the reagent **Craft cost** and a green
   **Craft profit** / red **Craft loss** line, comparing the item's auction
   price to what its reagents cost.
+- **NPC-price for vendor reagents** — NPC-sold trade goods (Empty Vial,
+  Crystal Vial, Wooden Stock, thread, flux, dyes, spices, …) are *learned*
+  by reading vendor inventories: any Trade Goods item a merchant offers at
+  unlimited stock for a plain gold price is recorded (account-wide) as an
+  **NPC price**. On those items the tooltip shows the fixed **NPC price**
+  instead of a misleading AH number, and the craft-cost maths above uses it
+  too, so reagents you buy from a vendor are costed at what you actually pay.
+  ("NPC price" = what you pay to buy, distinct from the existing "Vendor"
+  line = what an NPC pays you.) No curated list — coverage grows as you
+  visit vendors.
 - **Random-suffix price estimate** — random-enchant gear ("Dreamdust
   Slippers") is listed on the AH only under its rolled-suffix names
   ("… of the Magus", "… of the Owl", …), so the name-keyed DB has no entry
