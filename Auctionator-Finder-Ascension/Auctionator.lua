@@ -815,6 +815,10 @@ function Atr_Init()
 		Atr_ResetSavedVars();
 	end
 
+	if (AUCTIONATOR_SELL_IGNORE == nil) then
+		AUCTIONATOR_SELL_IGNORE = {};
+	end
+
 
 	if (AUCTIONATOR_SHOPPING_LISTS == nil) then
 		AUCTIONATOR_SHOPPING_LISTS = {};
@@ -1566,6 +1570,87 @@ local function Atr_SB_AddWidget(w)
     return w;
 end
 
+-----------------------------------------
+-- The Sell-tab "Ignore" list
+--
+-- Items the seller has parked out of the inventory browser's normal
+-- categories and into a dedicated "Ignore" bucket rendered at the bottom of
+-- the browser.  Keyed by numeric itemID (parsed from the item link) so it is
+-- stable across bag reshuffles and matches every stack of the same item.
+-- Persisted account-wide in AUCTIONATOR_SELL_IGNORE.
+-----------------------------------------
+
+local function Atr_SellIgnore_Store()
+    if (AUCTIONATOR_SELL_IGNORE == nil) then AUCTIONATOR_SELL_IGNORE = {}; end
+    return AUCTIONATOR_SELL_IGNORE;
+end
+
+local function Atr_SellIgnore_ItemID(link)
+    if (not link) then return nil; end
+    local id = string.match(link, "item:(%d+)");
+    return id and tonumber(id) or nil;
+end
+
+local function Atr_SellIgnore_IsIgnored(link)
+    local id = Atr_SellIgnore_ItemID(link);
+    if (not id) then return false; end
+    return Atr_SellIgnore_Store()[id] == true;
+end
+
+-- Returns true if the ignore state actually changed.
+local function Atr_SellIgnore_Set(link, on)
+    local id = Atr_SellIgnore_ItemID(link);
+    if (not id) then return false; end
+    local store = Atr_SellIgnore_Store();
+    local was = store[id] == true;
+    if (on) then store[id] = true; else store[id] = nil; end
+    return was ~= (on and true or false);
+end
+
+-- Rebuild the inventory browser if it is currently up, so an item moves into
+-- (or out of) the Ignore bucket the instant its state changes.
+local function Atr_SellIgnore_Refresh()
+    if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown() and Atr_SB_Build) then
+        Atr_SB_Build();
+    end
+end
+
+-- The "Ignore" button next to the drop slot.  With an item in the sell slot,
+-- clicking it moves that item into the Ignore bucket at the bottom of the
+-- inventory browser.
+function Atr_SellIgnore_OnClick()
+    local _, _, link = Atr_GetSellItemInfo();
+    if (not link or link == "") then
+        if (DEFAULT_CHAT_FRAME) then
+            DEFAULT_CHAT_FRAME:AddMessage("Auctionator: drop an item into the sell slot first, then click Ignore.");
+        end
+        return;
+    end
+
+    if (Atr_SellIgnore_Set(link, true) and DEFAULT_CHAT_FRAME) then
+        DEFAULT_CHAT_FRAME:AddMessage("Auctionator: " .. link .. " moved to the Ignore list.");
+    end
+
+    Atr_SellIgnore_Refresh();
+end
+
+-- Built in Lua (not XML) for the same reason as the drop zone: it lives on
+-- Atr_SellControls, whose children are shared with the other tabs, so it has
+-- to be created and shown per-tab and hidden again on the way out.
+function Atr_SellIgnore_ButtonEnsure()
+    if (Atr_SellIgnoreButton) then return Atr_SellIgnoreButton; end
+    if (not Atr_SellControls or not CreateFrame) then return nil; end
+
+    local b = CreateFrame("Button", "Atr_SellIgnoreButton", Atr_SellControls, "UIPanelButtonTemplate");
+    b:SetSize(48, 18);
+    b:SetText("Ignore");
+    local fs = b:GetFontString();
+    if (fs) then fs:SetFontObject("GameFontNormalSmall"); end
+    b:SetScript("OnClick", Atr_SellIgnore_OnClick);
+    b:Hide();
+    return b;
+end
+
 local itemSellableCache = {};
 function Atr_IsItemSellableOnAH(bag, slot, link, quality)
     if (GetPlayerMapPosition("player") == nil) then
@@ -1654,7 +1739,16 @@ local function Atr_SB_Item_OnClick(self, button)
     if (self.bagID and self.slotID) then
         -- Support both left and right click inside the SELL inventory browser only
         if (button == "LeftButton" or button == "RightButton") then
+            -- A click on a tile in the Ignore bucket takes the item back out of
+            -- the ignore list first, then places it exactly as any other tile
+            -- would: into the sell slot, and back under its real category on the
+            -- rebuild that follows.
+            local wasIgnored = self.ignored and self.itemLink
+                                and Atr_SellIgnore_Set(self.itemLink, false);
+
             Atr_LoadBagSlotToSellPane(self.bagID, self.slotID);
+
+            if (wasIgnored) then Atr_SellIgnore_Refresh(); end
         end
     end
 end
@@ -1701,6 +1795,7 @@ function Atr_SB_Build()
 
     local categories = {};   -- categories[cat] = { count, methods = { [m] = { count, items } } }
     local notProfit  = { count = 0, items = {} };   -- filtered-out items, rendered last
+    local ignored    = { count = 0, items = {} };   -- Ignore bucket, rendered dead last
 
     for bag = 0, NUM_BAG_SLOTS do
         local numSlots = GetContainerNumSlots(bag) or 0;
@@ -1713,12 +1808,20 @@ function Atr_SB_Build()
                 if (classIdx) then
                     local cat = sType or ZT("Other");
                     local method, profit = Atr_SB_BestMethod(link, name);
-                    local tile = { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1 };
+                    local tile = { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1, link=link };
+                    -- An ignored item leaves its normal category entirely and drops
+                    -- into the Ignore bucket at the very bottom, skipping the method
+                    -- split and the min. profit filter alike.  Clicking it there puts
+                    -- it back (see Atr_SB_Item_OnClick).
+                    if (Atr_SellIgnore_IsIgnored(link)) then
+                        tile.ignored = true;
+                        table.insert(ignored.items, tile);
+                        ignored.count = ignored.count + (itemCount or 1);
                     -- Min. profit filter: a priced item whose best method beats
                     -- vendoring by less than the threshold is not worth listing, so
                     -- it drops into the "Not Profitable" bucket instead of its normal
                     -- category.  Unpriced items (profit == nil) are always left alone.
-                    if (gSB_MinProfit > 0 and profit ~= nil and profit < gSB_MinProfit) then
+                    elseif (gSB_MinProfit > 0 and profit ~= nil and profit < gSB_MinProfit) then
                         table.insert(notProfit.items, tile);
                         notProfit.count = notProfit.count + (itemCount or 1);
                     else
@@ -1781,8 +1884,10 @@ function Atr_SB_Build()
             local btn = Atr_SB_AddWidget(CreateFrame("Button", nil, Atr_SB_Content));
             btn:SetSize(TILE, TILE);
             btn:SetPoint("TOPLEFT", BASEX + col*(TILE+GAP), rowStartY);
-            btn.bagID  = it.bag;
-            btn.slotID = it.slot;
+            btn.bagID    = it.bag;
+            btn.slotID   = it.slot;
+            btn.itemLink = it.link;
+            btn.ignored  = it.ignored;
             btn:RegisterForClicks("LeftButtonUp", "RightButtonUp");
             btn:SetScript("OnClick", Atr_SB_Item_OnClick);
             btn:SetScript("OnEnter", Atr_SB_Item_OnEnter);
@@ -1828,10 +1933,20 @@ function Atr_SB_Build()
         contentHeight = contentHeight + 4;
     end
 
-    -- "Not Profitable" always sorts last: items the min. profit filter swept out.
+    -- "Not Profitable" sorts after the real categories: items the min. profit
+    -- filter swept out.
     if (#notProfit.items > 0) then
         addHeader(string.format("%s (%d)", NOT_PROFITABLE, notProfit.count));
         renderTiles(notProfit.items);
+        y = y - 4;
+        contentHeight = contentHeight + 4;
+    end
+
+    -- "Ignore" always sorts dead last: items the seller parked here with the
+    -- Ignore button.  Clicking a tile here takes it back out (Atr_SB_Item_OnClick).
+    if (#ignored.items > 0) then
+        addHeader(string.format("%s (%d)", ZT("Ignore"), ignored.count));
+        renderTiles(ignored.items);
         y = y - 4;
         contentHeight = contentHeight + 4;
     end
@@ -2307,6 +2422,21 @@ function Atr_ApplySellExpandedLayout()
         end
     end
 
+    -- The Ignore button sits at the far left of the column, tucked against the
+    -- left edge of the drop box and centred on it, so it reads as "next to the
+    -- item you dropped".  Anchored to the box (not by a computed offset) it
+    -- stays put if the box moves.
+    local ignoreBtn = Atr_SellIgnore_ButtonEnsure and Atr_SellIgnore_ButtonEnsure();
+    if (ignoreBtn) then
+        ignoreBtn:ClearAllPoints();
+        if (zone) then
+            ignoreBtn:SetPoint ("RIGHT", zone, "LEFT", -4, 0);
+        else
+            ignoreBtn:SetPoint ("TOPLEFT", col, "TOPLEFT", 6, ATR_SELL_DROP_Y - 16);
+        end
+        ignoreBtn:Show();
+    end
+
     -- Silver and copper never hold more than two digits, so 8px off each is
     -- what lets Gold keep a six-figure field while the row still fits.
     local function money (frame, gold, silver, copper, y)
@@ -2461,6 +2591,7 @@ function Atr_ResetSellExpandedLayout()
     if (Atr_SellControls_TexName) then Atr_SellControls_TexName:Show(); end
     if (Atr_SellDropZone) then Atr_SellDropZone:Hide(); end
     if (Atr_SellDropHint) then Atr_SellDropHint:Hide(); end
+    if (Atr_SellIgnoreButton) then Atr_SellIgnoreButton:Hide(); end
     if (Atr_SellBrowser) then Atr_SellBrowser:Hide(); end
 
     -- Atr_SB_Build's tail re-shows the browser whenever this flag is up, and
