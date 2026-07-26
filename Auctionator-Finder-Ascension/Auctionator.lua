@@ -2175,7 +2175,7 @@ function Atr_SB_FailsMarginFilter (link, name, profit)
     -- harvest/scan has to fill it first.  A threshold of 0 is meaningful here:
     -- it holds any crafted item that would sell at a loss.
     if (gSB_CraftMarginOn) then
-        local craftCost = Atr_Craft_GetCraftCost and Atr_Craft_GetCraftCost(link) or nil;
+        local craftCost = Atr_Craft_GetCraftCost and Atr_Craft_GetCraftCost(link, name) or nil;
         if (craftCost) then
             local ah = (name and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
             if (ah and ah > 0 and (ah - craftCost) < gSB_CraftMargin) then
@@ -2239,10 +2239,21 @@ end
 -- SELL BROWSER: crafted-goods recipe harvest + cost ---------------------
 -- The 3.3.5 client cannot be asked "what reagents craft item X"; that data is
 -- only reachable while a profession window is open (GetTradeSkill* APIs).  So
--- we HARVEST it: every time the player opens/refreshes a profession, we record
--- each craftable item -> its reagents into AUCTIONATOR_CRAFT_RECIPES (account-
--- wide).  The Crafted Goods Margin filter then knows the craft cost of anything
--- the player can currently make.  Coverage grows as professions are opened.
+-- we HARVEST it into AUCTIONATOR_CRAFT_RECIPES (account-wide) from two sources:
+--
+--   1. Profession windows (Atr_Craft_Harvest): every craftable item the player
+--      can make.  Keyed by the produced item's ID, reagents by ID, with the
+--      exact yield.  This is the reliable source.
+--   2. Recipe ITEM tooltips (Atr_Craft_HarvestRecipeTooltip): when the player
+--      views a plan/formula/recipe/pattern/schematic they haven't necessarily
+--      learned, we read the created item from the recipe's name ("Pattern:
+--      Frostweave Bag" -> "Frostweave Bag") and scrape the reagent line from
+--      the tooltip.  Keyed by the created item's NAME, reagents by NAME, yield
+--      assumed 1.  Best-effort (English tooltip format), fills coverage the
+--      profession windows miss.
+--
+-- The Crafted Goods Margin filter then knows the craft cost of anything from
+-- either source.  Coverage grows as professions are opened and recipes viewed.
 
 local function Atr_Craft_DB()
     AUCTIONATOR_CRAFT_RECIPES = AUCTIONATOR_CRAFT_RECIPES or {};
@@ -2290,31 +2301,42 @@ function Atr_Craft_Harvest()
     end
 end
 
--- Per-item cost, in copper, to buy the reagents and craft `link`, or nil when
--- it isn't a harvested recipe or a reagent price is missing.  Reagent price is
--- Auctionator's auction price; when a reagent has no auction price (e.g. it is
--- vendor-bought) we fall back to its vendor value as a rough floor.  If even
--- that is unavailable (item not cached) the total is unknown, so we return nil
--- and the caller leaves the item unfiltered.
-function Atr_Craft_GetCraftCost(link)
-    if (link == nil or AUCTIONATOR_CRAFT_RECIPES == nil) then return nil; end
+-- Per-item cost, in copper, to buy the reagents and craft the item, or nil when
+-- it isn't a harvested recipe or a reagent price is missing.  Looks up the
+-- recipe by produced-item ID (profession-window source) first, then by name
+-- (recipe-tooltip source).  Reagent price is Auctionator's auction price (the
+-- price DB is name-keyed, so ID- and name-based reagents both resolve); when a
+-- reagent has no auction price (e.g. it is vendor-bought) we fall back to its
+-- vendor value as a rough floor.  If even that is unavailable (item not cached)
+-- the total is unknown, so we return nil and the caller leaves it unfiltered.
+function Atr_Craft_GetCraftCost(link, name)
+    if (AUCTIONATOR_CRAFT_RECIPES == nil) then return nil; end
+
+    local rec;
 
     local itemID;
     if (type(link) == "number") then
         itemID = link;
-    elseif (zc and zc.ItemIDfromLink) then
+    elseif (link and zc and zc.ItemIDfromLink) then
         itemID = tonumber(zc.ItemIDfromLink(link));
     end
-    if (itemID == nil) then return nil; end
+    if (itemID) then rec = AUCTIONATOR_CRAFT_RECIPES[itemID]; end
 
-    local rec = AUCTIONATOR_CRAFT_RECIPES[itemID];
+    if (rec == nil) then
+        if (name == nil and link and type(link) ~= "number" and GetItemInfo) then
+            name = GetItemInfo(link);
+        end
+        if (name) then rec = AUCTIONATOR_CRAFT_RECIPES[name]; end
+    end
+
     if (rec == nil or rec.reagents == nil) then return nil; end
 
     local total = 0;
     for _, r in ipairs(rec.reagents) do
-        local price = Atr_GetAuctionPrice and tonumber(Atr_GetAuctionPrice(r.id)) or nil;
+        local key = r.id or r.name;   -- ID from window harvest, name from tooltip harvest
+        local price = (key and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(key)) or nil;
         if (price == nil or price <= 0) then
-            price = Atr_GetSellValue and tonumber(Atr_GetSellValue(r.id)) or nil;   -- vendor-value floor
+            price = (key and Atr_GetSellValue) and tonumber(Atr_GetSellValue(key)) or nil;   -- vendor-value floor
         end
         if (price == nil or price <= 0) then
             return nil;   -- a reagent we can't price -> craft cost unknown
@@ -2325,6 +2347,58 @@ function Atr_Craft_GetCraftCost(link)
     local made = rec.made or 1;
     if (made < 1) then made = 1; end
     return math.floor(total / made);
+end
+
+-- Split a tooltip line into reagent {name, count} pairs, or nil if the line is
+-- not a reagent list.  Recipe tooltips end with a line like
+-- "Frostweave Cloth (4), Infinite Dust (1)"; every comma-segment is
+-- "<name> (<count>)".  The "Requires <Profession> (<skill>)" line also carries
+-- a parenthesised number, so lines starting with "Requires"/"Use:" are rejected.
+local function Atr_Craft_ParseReagentLine(text)
+    if (type(text) ~= "string" or text == "") then return nil; end
+    if (text:find("^Requires") or text:find("^Use:")) then return nil; end
+
+    local reagents = {};
+    for seg in string.gmatch(text .. ",", "%s*(.-)%s*,") do
+        local rname, rcount = seg:match("^(.-)%s*%((%d+)%)$");
+        if (not rname or rname == "") then return nil; end   -- a non-reagent segment: not a reagent line
+        table.insert(reagents, { name = rname, count = tonumber(rcount) or 1 });
+    end
+    if (#reagents == 0) then return nil; end
+    return reagents;
+end
+
+-- Harvest a recipe from the tooltip currently showing for a Recipe-class item.
+-- `itemName` is the recipe item's name ("Pattern: Frostweave Bag"); the created
+-- item's name is whatever follows the "<Prefix>: " (that is the item the player
+-- would have in their bags).  The reagent list is scraped from the tooltip's
+-- bottom line.  Yield is not shown on recipe tooltips, so it is assumed 1 --
+-- for multi-yield recipes this overestimates per-item cost (holds more), which
+-- is the safe direction.  Best-effort, English tooltip format.
+function Atr_Craft_HarvestRecipeTooltip(tip, itemName)
+    if (tip == nil or type(itemName) ~= "string") then return; end
+
+    local created = itemName:match("^%a+:%s+(.+)$");   -- strip Plans:/Pattern:/Recipe:/Formula:/...
+    if (created == nil or created == "") then return; end
+
+    local getName = tip.GetName and tip:GetName() or nil;
+    if (getName == nil) then return; end
+    local n = (tip.NumLines and tip:NumLines()) or 0;
+
+    local reagents;
+    for i = 2, n do
+        local fs = _G[getName .. "TextLeft" .. i];
+        local txt = fs and fs.GetText and fs:GetText() or nil;
+        local parsed = Atr_Craft_ParseReagentLine(txt);
+        if (parsed) then reagents = parsed; end   -- keep the last match (reagents sit at the bottom)
+    end
+
+    if (reagents) then
+        local db = Atr_Craft_DB();
+        -- Don't shadow a precise profession-window entry: only the name key is
+        -- written here, and the cost lookup prefers the ID key.
+        db[created] = { made = 1, reagents = reagents, byTooltip = true };
+    end
 end
 
 -- Harvest whenever a profession window opens or refreshes.  A dedicated frame
