@@ -7,8 +7,8 @@ the auction house.
 
 > Auctionator is by **Zirco**, community-maintained for Ascension by the
 > [Ascension-Addons](https://github.com/Ascension-Addons) contributors.
-> This build adds the Finder tab (and supporting tooling) on top of the
-> Ascension build. Interface version `30300`.
+> This build adds the Finder and Bazaar tabs, plus Sell-tab tooling, on top
+> of the Ascension build. Interface version `30300`.
 
 ---
 
@@ -70,6 +70,45 @@ especially [`FINDER-ARCHITECTURE.md`](Old%20Docs/FINDER-ARCHITECTURE.md),
 [`BAZAAR-ARCHITECTURE.md`](Old%20Docs/BAZAAR-ARCHITECTURE.md),
 [`AUCTIONATOR-INTERNALS.md`](Old%20Docs/AUCTIONATOR-INTERNALS.md), and
 [`ASCENSION-CLIENT-NOTES.md`](Old%20Docs/ASCENSION-CLIENT-NOTES.md).
+
+---
+
+## Sell tab — inventory browser
+
+The stock Sell tab gains an inventory browser that reads your bags and sorts
+every sellable item by the **best way to sell it**:
+
+- **Best-method buckets** — each item is filed under **Auction**,
+  **Disenchant**, or **Vendor**, whichever nets the most (AH price wins ties,
+  then Disenchant over Vendor), so you can see at a glance what's worth listing
+  versus what to vendor or DE.
+- **Scan Inventory** — one button prices every distinct item in your bags
+  against Auctionator's price database in a single pass; the buckets and
+  margins fill in as prices arrive.
+- **Profit Margin filters** — a **Profit Margin** popup adds two independent
+  thresholds: **Vendor Margin** (how much the best method beats simply
+  vendoring) and **Crafted Goods Margin** (auction price minus reagent cost).
+  An item that fails an enabled filter drops into a **Not Profitable** bucket
+  instead of cluttering the real categories. Items whose data isn't known yet
+  (unpriced, or a craft cost that can't be totalled) are left alone until a
+  scan or tooltip harvest fills them.
+- **Ignore bucket** — an **Ignore** button parks the item in the sell slot
+  into a dedicated bucket at the very bottom, skipping the method split and the
+  margin filters alike; click the tile there to take it back out.
+
+---
+
+## Bazaar tab — token ⇄ gold converter
+
+Ascension sells vanity and convenience goods for **Bazaar Tokens** (ordinary
+item `975001`), which players get either with real money (DP on the webshop)
+or with gold by buying them off the auction house. The Bazaar tab models that
+whole chain — `USD → DP → Bazaar Token → gold` — with every rate
+player-editable and persisted, and prices the token catalogue so each item
+shows, per unit, whether it's cheaper to buy **with tokens or with gold**. The
+**Margin** column already nets out the auction house's cut on a sale (5% by
+default), so the comparison reflects what you'd actually clear rather than an
+optimistic sticker price.
 
 ---
 
