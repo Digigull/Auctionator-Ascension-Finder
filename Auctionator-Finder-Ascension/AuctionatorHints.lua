@@ -1673,9 +1673,15 @@ local function ShowTipWithPricing (tip, link, num)
 
 	local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, _, _, _, _, itemVendorPrice = GetItemInfo (link);
 
+	-- Recipe items expose their reagents only in the tooltip; harvest them for
+	-- the SELL tab's Crafted Goods Margin filter (see Atr_Craft_HarvestRecipeTooltip).
+	if (itemType == "Recipe" and Atr_Craft_HarvestRecipeTooltip) then
+		Atr_Craft_HarvestRecipeTooltip (tip, itemName);
+	end
+
 	local itemID = zc.ItemIDfromLink (link);
 	itemID = tonumber(itemID);
-	
+
 	local vendorPrice	= 0;
 	local auctionPrice	= 0;
     local auctionMedianPrice = 0;
