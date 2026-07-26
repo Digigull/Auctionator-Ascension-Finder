@@ -915,15 +915,15 @@
 
 						<FontString name="Atr_Col1_Heading" inherits="GameFontHighlightSmall" text="Item Price" hidden="true" justifyH="CENTER">
 							<Size><AbsDimension x="100"/></Size>
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="40" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="65" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 
 						<FontString name="Atr_Col3_Heading" inherits="GameFontHighlightSmall" text="Current Auctions" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="175" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="200" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 
 						<FontString name="Atr_Col4_Heading" inherits="GameFontHighlightSmall" text="Total Price" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="500" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="550" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 					</Layer>
 				</Layers>
