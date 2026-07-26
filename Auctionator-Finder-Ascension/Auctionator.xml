@@ -538,6 +538,32 @@
 				<DisabledFont style="GameFontDisableSmall"/>
 			</Button>
 
+			<!-- Min. profit filter: currency input + apply button, right of Scan Inventory.
+			     Positioned/shown by the expanded SELL layout so it tracks the Scan button. -->
+			<Frame name="Atr_SB_MinProfit" inherits="MoneyInputFrameTemplate" hidden="true">
+				<Anchors>
+					<Anchor point="LEFT" relativeTo="Atr_SellBrowser_Scan" relativePoint="RIGHT"><Offset><AbsDimension x="12" y="0"/></Offset></Anchor>
+				</Anchors>
+				<Scripts>
+					<OnLoad>
+						Atr_SB_MinProfitGold:SetJustifyH("CENTER");
+					</OnLoad>
+				</Scripts>
+			</Frame>
+
+			<Button name="Atr_SB_MinProfitApply" inherits="UIPanelButtonTemplate" text="Set min. profit" hidden="true">
+				<Size><AbsDimension x="95" y="18"/></Size>
+				<Anchors>
+					<Anchor point="LEFT" relativeTo="Atr_SB_MinProfitCopper" relativePoint="RIGHT"><Offset><AbsDimension x="10" y="0"/></Offset></Anchor>
+				</Anchors>
+				<Scripts>
+					<OnClick>Atr_SB_ApplyMinProfit();</OnClick>
+				</Scripts>
+				<NormalFont style="GameFontNormalSmall"/>
+				<HighlightFont style="GameFontHighlightSmall"/>
+				<DisabledFont style="GameFontDisableSmall"/>
+			</Button>
+
 			<Frame name="Atr_SellControls" hidden="true">
 				<Size><AbsDimension x="170" y="335"/></Size>
 				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="-193" y="-75"/></Offset></Anchor></Anchors>
