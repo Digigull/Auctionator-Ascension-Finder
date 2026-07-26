@@ -2030,6 +2030,13 @@ ATR_SELL_LIST_H = 74;       -- results scroll height; 4 rows at 16px
                             -- Down from 6: the inventory could not reach the
                             -- Current/Ledger tabs without the results block
                             -- moving down, and those rows are what paid for it.
+
+-- Results-block vertical offsets in the expanded SELL layout (panel-relative).
+-- Raised together from -290 / -335 so the Current/Ledger tabs sit level with
+-- the Scan Inventory button, right under the inventory.  Kept as named
+-- constants because these are the two values to nudge when tuning that gap.
+ATR_SELL_HB_Y = -268;       -- Atr_HeadingsBar TOPLEFT y (tabs follow it)
+ATR_SELL_SF_Y = -313;       -- AuctionatorScrollFrame TOPLEFT y (45 below the bar)
 ATR_SELL_NAME_W = 215;      -- header item-name budget, before the basis note
 
 -- Put the selected item's name in the header strip, chopped to fit.  3.3.5
@@ -2320,14 +2327,26 @@ function Atr_ApplySellExpandedLayout()
 
     ---- 4. results area takes the height the inventory gave up ----
 
-    -- Atr_ListTabs anchors to Atr_HeadingsBar's TOPRIGHT, so it follows.
+    -- Atr_ListTabs anchors to Atr_HeadingsBar's TOPRIGHT, so it follows.  The
+    -- block is raised (-290 -> -268) so the Current/Ledger tabs sit right under
+    -- the inventory, level with the Scan Inventory button, instead of a row
+    -- lower.  ATR_SELL_HB_Y / ATR_SELL_SF_Y keep the two in step for tuning.
     if (Atr_HeadingsBar) then
         Atr_HeadingsBar:ClearAllPoints();
-        Atr_HeadingsBar:SetPoint ("TOPLEFT", panel, "TOPLEFT", 6, -290);
+        Atr_HeadingsBar:SetPoint ("TOPLEFT", panel, "TOPLEFT", 6, ATR_SELL_HB_Y);
+
+        -- Extend the divider art (the label-frame texture behind the column
+        -- headings) leftward so it starts at the inventory's left edge (panel
+        -- x -26) instead of the headings frame's left (x 6): a 32px reach left.
+        if (Atr_HeadingsBarMiddle) then
+            Atr_HeadingsBarMiddle:ClearAllPoints();
+            Atr_HeadingsBarMiddle:SetPoint ("TOPLEFT",     Atr_HeadingsBar, "TOPLEFT",     -32, 0);
+            Atr_HeadingsBarMiddle:SetPoint ("BOTTOMRIGHT", Atr_HeadingsBar, "BOTTOMRIGHT",   0, 0);
+        end
     end
     if (AuctionatorScrollFrame) then
         AuctionatorScrollFrame:ClearAllPoints();
-        AuctionatorScrollFrame:SetPoint ("TOPLEFT", panel, "TOPLEFT", 0, -335);
+        AuctionatorScrollFrame:SetPoint ("TOPLEFT", panel, "TOPLEFT", 0, ATR_SELL_SF_Y);
         AuctionatorScrollFrame:SetHeight (ATR_SELL_LIST_H);
     end
 
@@ -2343,6 +2362,15 @@ function Atr_ResetSellExpandedLayout()
     if (not gSellLayoutExpandedApplied) then return; end
 
     Atr_Sell_RestoreGeom();
+
+    -- The divider texture is not in ATR_SELL_GEOM (it is a child region, not a
+    -- frame), so restore its full-frame fill by hand or the leftward extension
+    -- would linger onto the Buy tab, which shares this headings bar.
+    if (Atr_HeadingsBarMiddle and Atr_HeadingsBar) then
+        Atr_HeadingsBarMiddle:ClearAllPoints();
+        Atr_HeadingsBarMiddle:SetPoint ("TOPLEFT",     Atr_HeadingsBar, "TOPLEFT",     0, 0);
+        Atr_HeadingsBarMiddle:SetPoint ("BOTTOMRIGHT", Atr_HeadingsBar, "BOTTOMRIGHT", 0, 0);
+    end
 
     if (Atr_SellControls_TexName) then Atr_SellControls_TexName:Show(); end
     if (Atr_SellDropZone) then Atr_SellDropZone:Hide(); end
@@ -4524,12 +4552,22 @@ function Atr_ShowHistory ()
 		Atr_Col3_Heading:Show();
 	end
 
-	local line;							-- 1 through 12 of our window to scroll
+	local line;							-- 1 through visibleLines of our window to scroll
 	local dataOffset;					-- an index into our data calculated from the scroll offset
 
-	FauxScrollFrame_Update (AuctionatorScrollFrame, numrows, 12, 16);
+    -- Match the Current tab: on SELL/BUY the results area is short (a few rows),
+    -- so the visible-line count must come from the frame height.  Left at a
+    -- hardcoded 12, the Ledger renders all 12 physical rows past the bottom of
+    -- the short list -- the "infinite scroll" bleed.
+    local visibleLines = 12;
+    if (Atr_IsTabSelected and (Atr_IsTabSelected(SELL_TAB) or Atr_IsTabSelected(BUY_TAB)) and AuctionatorScrollFrame and AuctionatorScrollFrame.GetHeight) then
+        local h = AuctionatorScrollFrame:GetHeight() or 196;
+        visibleLines = math.max(1, math.min(12, math.floor(h / 16)));
+    end
 
-	for line = 1,12 do
+	FauxScrollFrame_Update (AuctionatorScrollFrame, numrows, visibleLines, 16);
+
+	for line = 1,visibleLines do
 
 		dataOffset = line + (FauxScrollFrame_GetOffset(AuctionatorScrollFrame) or 0);
 
@@ -4564,6 +4602,14 @@ function Atr_ShowHistory ()
 			lineEntry:Hide();
 		end
 	end
+
+    -- Hide any extra rows beyond visibleLines on SELL/BUY so they don't bleed outside
+    if (Atr_IsTabSelected and (Atr_IsTabSelected(SELL_TAB) or Atr_IsTabSelected(BUY_TAB))) then
+        for i = visibleLines + 1, 15 do
+            local extra = _G["AuctionatorEntry"..i];
+            if (extra) then extra:Hide(); end
+        end
+    end
 
 	if (Atr_IsTabSelected (SELL_TAB)) then
 		Atr_HighlightEntry (gCurrentPane.histIndex);		-- need this for when called from onVerticalScroll
