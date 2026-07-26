@@ -2037,6 +2037,7 @@ ATR_SELL_LIST_H = 74;       -- results scroll height; 4 rows at 16px
 -- constants because these are the two values to nudge when tuning that gap.
 ATR_SELL_HB_Y = -268;       -- Atr_HeadingsBar TOPLEFT y (tabs follow it)
 ATR_SELL_SF_Y = -313;       -- AuctionatorScrollFrame TOPLEFT y (45 below the bar)
+ATR_SELL_SCANBTN_Y = 2;     -- Scan Inventory button y vs the divider top edge
 ATR_SELL_NAME_W = 215;      -- header item-name budget, before the basis note
 
 -- Put the selected item's name in the header strip, chopped to fit.  3.3.5
@@ -2343,6 +2344,17 @@ function Atr_ApplySellExpandedLayout()
             Atr_HeadingsBarMiddle:SetPoint ("TOPLEFT",     Atr_HeadingsBar, "TOPLEFT",     -32, 0);
             Atr_HeadingsBarMiddle:SetPoint ("BOTTOMRIGHT", Atr_HeadingsBar, "BOTTOMRIGHT",   0, 0);
         end
+
+        -- Raising the block put the divider on top of the Scan Inventory button
+        -- (anchored to the inventory's bottom) and buried it.  Re-anchor the
+        -- button onto the divider's top edge, left-aligned with the extended
+        -- divider, and lift its frame level so the bar cannot draw over it.
+        if (Atr_SellBrowser_Scan) then
+            Atr_SellBrowser_Scan:ClearAllPoints();
+            Atr_SellBrowser_Scan:SetPoint ("TOPLEFT", Atr_HeadingsBar, "TOPLEFT", -32, ATR_SELL_SCANBTN_Y);
+            Atr_SellBrowser_Scan:SetFrameLevel ((Atr_HeadingsBar:GetFrameLevel() or 5) + 5);
+            Atr_SellBrowser_Scan:Show();
+        end
     end
     if (AuctionatorScrollFrame) then
         AuctionatorScrollFrame:ClearAllPoints();
@@ -2370,6 +2382,12 @@ function Atr_ResetSellExpandedLayout()
         Atr_HeadingsBarMiddle:ClearAllPoints();
         Atr_HeadingsBarMiddle:SetPoint ("TOPLEFT",     Atr_HeadingsBar, "TOPLEFT",     0, 0);
         Atr_HeadingsBarMiddle:SetPoint ("BOTTOMRIGHT", Atr_HeadingsBar, "BOTTOMRIGHT", 0, 0);
+    end
+
+    -- Return the Scan Inventory button to its browser-relative anchor.
+    if (Atr_SellBrowser_Scan and Atr_SellBrowser) then
+        Atr_SellBrowser_Scan:ClearAllPoints();
+        Atr_SellBrowser_Scan:SetPoint ("TOPLEFT", Atr_SellBrowser, "BOTTOMLEFT", 0, -4);
     end
 
     if (Atr_SellControls_TexName) then Atr_SellControls_TexName:Show(); end
