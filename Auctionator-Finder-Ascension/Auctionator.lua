@@ -2334,7 +2334,14 @@ function Atr_Craft_GetCraftCost(link, name)
     local total = 0;
     for _, r in ipairs(rec.reagents) do
         local key = r.id or r.name;   -- ID from window harvest, name from tooltip harvest
-        local price = (key and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(key)) or nil;
+
+        -- NPC-sold reagent (vial, thread, flux, ...): its real cost is the fixed
+        -- NPC price, so use that and ignore whatever it's relisted for on the AH.
+        local price = (r.id and Atr_GetNPCPrice) and tonumber(Atr_GetNPCPrice(r.id)) or nil;
+
+        if (price == nil or price <= 0) then
+            price = (key and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(key)) or nil;
+        end
         if (price == nil or price <= 0) then
             price = (key and Atr_GetSellValue) and tonumber(Atr_GetSellValue(key)) or nil;   -- vendor-value floor
         end
