@@ -220,7 +220,10 @@
 				</Frames>
 			</Frame>
 			
-			<Frame>
+			<!-- Middle column ("Current Auctions" / "History").  Named so the
+			     Atr_Col3_Heading header can anchor to it (single source of truth
+			     for that column's X); runtime code still finds it via GetParent(). -->
+			<Frame name="$parent_MidFrame">
 				<Size><AbsDimension x="240" y="16" /></Size>
 				<Anchors><Anchor point="LEFT"><Offset><AbsDimension x="167" y="0"/></Offset></Anchor></Anchors>
 				<Layers>
@@ -231,7 +234,10 @@
 			</Frame>
 			
 
-			<Frame>
+			<!-- Right column ("Stack Price").  Named so the Atr_Col4_Heading
+			     header can anchor to it (single source of truth for that
+			     column's X); runtime code still finds it via GetParent(). -->
+			<Frame name="$parent_StackFrame">
 				<Size><AbsDimension x="120" y="16" /></Size>
 				<Anchors><Anchor point="LEFT"><Offset><AbsDimension x="440" y="0"/></Offset></Anchor></Anchors>
 				<Layers>
@@ -913,17 +919,25 @@
 							<TexCoords left="0.1953125" right="0.8046875" top="0" bottom="1"/>
 						</Texture>
 
+						<!-- Result-column headers are anchored to the DATA COLUMNS (row 1's
+						     column frames), not to independent offsets, so the two can
+						     never drift apart again: move a column and its header follows.
+						       * y = 27 lifts the header from the row's mid-line onto the bar.
+						       * x is the header's offset from the column edge; it encodes the
+						         intended look and does NOT need re-tuning when a column moves.
+						     This is the single source of truth for horizontal alignment; do
+						     not reintroduce hard-coded x offsets relative to $parentMiddle. -->
 						<FontString name="Atr_Col1_Heading" inherits="GameFontHighlightSmall" text="Item Price" hidden="true" justifyH="CENTER">
 							<Size><AbsDimension x="100"/></Size>
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="65" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="RIGHT" relativeTo="AuctionatorEntry1_PerItem_Price"><Offset><AbsDimension x="-79" y="27"/></Offset></Anchor></Anchors>
 						</FontString>
 
 						<FontString name="Atr_Col3_Heading" inherits="GameFontHighlightSmall" text="Current Auctions" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="200" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="AuctionatorEntry1_MidFrame"><Offset><AbsDimension x="26" y="27"/></Offset></Anchor></Anchors>
 						</FontString>
 
 						<FontString name="Atr_Col4_Heading" inherits="GameFontHighlightSmall" text="Total Price" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="550" y="1"/></Offset></Anchor></Anchors>
+							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="AuctionatorEntry1_StackFrame"><Offset><AbsDimension x="108" y="27"/></Offset></Anchor></Anchors>
 						</FontString>
 					</Layer>
 				</Layers>
