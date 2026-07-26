@@ -205,9 +205,17 @@ local gSB_Scanning   = false;     -- a "Scan Prices" run over the inventory is i
 local gSB_ScanNames  = {};        -- distinct item names queued for the current scan
 local gSB_ScanIdx    = 0;         -- index into gSB_ScanNames of the name being scanned
 local gSB_ScanFeedOff = false;    -- a scan finished but the price feed was disabled
-local gSB_MinProfit  = 0;         -- "Set min. profit" filter, in copper; 0 = filter off.
-                                  -- Items whose best-method gain over vendoring is below
-                                  -- this are moved to a "Not Profitable" bucket at the bottom.
+-- Profit Margin filters (edited in the Atr_ProfitMarginPopup dialog, persisted
+-- in AUCTIONATOR_FINDER_SETTINGS.sellMargins -- see Atr_PM_LoadSettings).
+-- Vendor Margin: how much the best selling method beats simply vendoring the
+-- item by (per item, in copper).  Crafted Goods Margin: for craftable items,
+-- the auction price minus what the reagents cost (per item, in copper).  An
+-- item that fails an ENABLED filter drops into the "Not Profitable" bucket.
+local gSB_VendorMarginOn = false;   -- Vendor Margin filter enabled
+local gSB_VendorMargin   = 0;       -- Vendor Margin threshold, copper
+local gSB_CraftMarginOn  = false;   -- Crafted Goods Margin filter enabled
+local gSB_CraftMargin    = 0;       -- Crafted Goods Margin threshold, copper (may be 0)
+local gSB_MarginsLoaded  = false;   -- settings copied from saved vars yet?
 
 -- SELL tab enlarged layout state
 local gSellLayoutExpandedApplied = false;
@@ -1756,6 +1764,7 @@ end
 function Atr_SB_Build()
     if (not Atr_SB_Content) then return; end
 
+    if (Atr_PM_LoadSettings) then Atr_PM_LoadSettings(); end   -- honor saved Profit Margin filters on first build
     Atr_SB_Clear();
 
     -- Within each item-type category, items are further split by which selling
@@ -1817,11 +1826,13 @@ function Atr_SB_Build()
                         tile.ignored = true;
                         table.insert(ignored.items, tile);
                         ignored.count = ignored.count + (itemCount or 1);
-                    -- Min. profit filter: a priced item whose best method beats
-                    -- vendoring by less than the threshold is not worth listing, so
-                    -- it drops into the "Not Profitable" bucket instead of its normal
-                    -- category.  Unpriced items (profit == nil) are always left alone.
-                    elseif (gSB_MinProfit > 0 and profit ~= nil and profit < gSB_MinProfit) then
+                    -- Profit Margin filters: a priced item that fails an enabled
+                    -- filter is not worth listing, so it drops into the "Not
+                    -- Profitable" bucket instead of its normal category.  The two
+                    -- filters are independent -- failing EITHER is enough.  Items
+                    -- with unknown data (unpriced, or a craft cost we can't total)
+                    -- are always left alone: a scan/harvest has to fill them first.
+                    elseif (Atr_SB_FailsMarginFilter(link, name, profit)) then
                         table.insert(notProfit.items, tile);
                         notProfit.count = notProfit.count + (itemCount or 1);
                     else
@@ -1965,8 +1976,8 @@ function Atr_SB_Toggle()
         if (Atr_SellBrowser_Toggle) then Atr_SellBrowser_Toggle:SetText("Inventory"); end
         if (Atr_SellBrowser) then Atr_SellBrowser:Hide(); end
         if (Atr_SellBrowser_Scan) then Atr_SellBrowser_Scan:Hide(); end
-        if (Atr_SB_MinProfit) then Atr_SB_MinProfit:Hide(); end
-        if (Atr_SB_MinProfitApply) then Atr_SB_MinProfitApply:Hide(); end
+        if (Atr_SB_ProfitMargin) then Atr_SB_ProfitMargin:Hide(); end
+        if (Atr_ProfitMarginPopup) then Atr_ProfitMarginPopup:Hide(); end
         if (Atr_SellControls) then Atr_SellControls:Show(); end
     end
 end
@@ -2105,26 +2116,224 @@ function Atr_SB_ScanPrices()
     Atr_SB_ScanNext();
 end
 
--- SELL BROWSER: "Set min. profit" filter ------------------------------
--- Reads the currency input next to Scan Inventory and rebuilds the browser.
--- A value of 0 (empty box) clears the filter, so the same button both sets
--- and clears it.  Profit here is per item: how much the best selling method
--- beats vendoring by (see Atr_SB_BestMethod).
-function Atr_SB_ApplyMinProfit()
-    if (Atr_SB_MinProfit and MoneyInputFrame_GetCopper) then
-        gSB_MinProfit = tonumber(MoneyInputFrame_GetCopper(Atr_SB_MinProfit)) or 0;
+-- SELL BROWSER: Profit Margin filters ---------------------------------
+-- Two independent per-item filters, edited in the Atr_ProfitMarginPopup
+-- dialog and persisted between sessions:
+--
+--   Vendor Margin  - how much the best selling method (Auction/Disenchant)
+--                    beats simply vendoring the item by.  This is what the
+--                    old "Set min. profit" box measured (see Atr_SB_BestMethod).
+--   Crafted Goods  - for items the player can craft, the current auction price
+--     Margin         minus what the reagents cost to buy (see Atr_Craft_GetCraftCost).
+--                    Lets you hold onto crafted gear until the market pays
+--                    enough over what it cost you to make.
+--
+-- An item that fails an ENABLED filter drops into the "Not Profitable"
+-- bucket at the bottom of the browser instead of its normal category.
+
+local function Atr_Money (copper)
+    return (Atr_Bz_MoneyString and Atr_Bz_MoneyString(copper)) or ((copper or 0) .. "c");
+end
+
+-- Copy the saved thresholds/toggles into the working globals, once per
+-- session (the saved var only exists after VARIABLES_LOADED).
+function Atr_PM_LoadSettings()
+    if (gSB_MarginsLoaded) then return; end
+    local s = AUCTIONATOR_FINDER_SETTINGS and AUCTIONATOR_FINDER_SETTINGS.sellMargins;
+    if (s) then
+        gSB_VendorMarginOn = s.vendorOn and true or false;
+        gSB_VendorMargin   = tonumber(s.vendor) or 0;
+        gSB_CraftMarginOn  = s.craftOn and true or false;
+        gSB_CraftMargin    = tonumber(s.craft) or 0;
     end
-    if (gSB_MinProfit < 0) then gSB_MinProfit = 0; end
-    if (DEFAULT_CHAT_FRAME) then
-        if (gSB_MinProfit > 0) then
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Min. profit filter set to "
-                .. (Atr_Bz_MoneyString and Atr_Bz_MoneyString(gSB_MinProfit) or (gSB_MinProfit .. "c"))
-                .. " - items below it move to \"Not Profitable\".");
-        else
-            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Min. profit filter cleared.");
+    gSB_MarginsLoaded = true;
+end
+
+local function Atr_PM_SaveSettings()
+    AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
+    AUCTIONATOR_FINDER_SETTINGS.sellMargins = {
+        vendorOn = gSB_VendorMarginOn,
+        vendor   = gSB_VendorMargin,
+        craftOn  = gSB_CraftMarginOn,
+        craft    = gSB_CraftMargin,
+    };
+end
+
+-- Returns true if a priced item fails an enabled Profit Margin filter and so
+-- should be swept into "Not Profitable".  `profit` is the Vendor Margin value
+-- already computed by Atr_SB_BestMethod (nil for unpriced items).
+function Atr_SB_FailsMarginFilter (link, name, profit)
+    -- Vendor Margin: priced item whose best method beats vendoring by less
+    -- than the threshold.  Unpriced items (profit == nil) are left alone.
+    if (gSB_VendorMarginOn and gSB_VendorMargin > 0 and profit ~= nil and profit < gSB_VendorMargin) then
+        return true;
+    end
+
+    -- Crafted Goods Margin: only applies to craftable items whose reagent cost
+    -- we can fully total AND that have a known auction price.  Anything missing
+    -- (not craftable, incomplete reagent prices, unpriced) is left alone -- a
+    -- harvest/scan has to fill it first.  A threshold of 0 is meaningful here:
+    -- it holds any crafted item that would sell at a loss.
+    if (gSB_CraftMarginOn) then
+        local craftCost = Atr_Craft_GetCraftCost and Atr_Craft_GetCraftCost(link) or nil;
+        if (craftCost) then
+            local ah = (name and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
+            if (ah and ah > 0 and (ah - craftCost) < gSB_CraftMargin) then
+                return true;
+            end
         end
     end
+
+    return false;
+end
+
+-- Prefill the popup widgets from the current settings and show it.
+function Atr_PM_Open()
+    Atr_PM_LoadSettings();
+    if (not Atr_ProfitMarginPopup) then return; end
+
+    if (Atr_PM_VendorCheck) then Atr_PM_VendorCheck:SetChecked(gSB_VendorMarginOn); end
+    if (Atr_PM_CraftCheck)  then Atr_PM_CraftCheck:SetChecked(gSB_CraftMarginOn); end
+    if (Atr_PM_VendorMoney and MoneyInputFrame_SetCopper) then MoneyInputFrame_SetCopper(Atr_PM_VendorMoney, gSB_VendorMargin); end
+    if (Atr_PM_CraftMoney and MoneyInputFrame_SetCopper)  then MoneyInputFrame_SetCopper(Atr_PM_CraftMoney, gSB_CraftMargin); end
+
+    Atr_ProfitMarginPopup:Show();
+    Atr_ProfitMarginPopup:Raise();
+end
+
+-- Discard edits: just close.  (Atr_PM_Open re-syncs the widgets next time.)
+function Atr_PM_Cancel()
+    if (Atr_ProfitMarginPopup) then Atr_ProfitMarginPopup:Hide(); end
+end
+
+-- Read the popup widgets into the working state, persist, report, rebuild.
+function Atr_PM_Apply()
+    if (Atr_PM_VendorCheck) then gSB_VendorMarginOn = Atr_PM_VendorCheck:GetChecked() and true or false; end
+    if (Atr_PM_CraftCheck)  then gSB_CraftMarginOn  = Atr_PM_CraftCheck:GetChecked() and true or false; end
+    if (Atr_PM_VendorMoney and MoneyInputFrame_GetCopper) then gSB_VendorMargin = tonumber(MoneyInputFrame_GetCopper(Atr_PM_VendorMoney)) or 0; end
+    if (Atr_PM_CraftMoney and MoneyInputFrame_GetCopper)  then gSB_CraftMargin  = tonumber(MoneyInputFrame_GetCopper(Atr_PM_CraftMoney)) or 0; end
+    if (gSB_VendorMargin < 0) then gSB_VendorMargin = 0; end
+    if (gSB_CraftMargin  < 0) then gSB_CraftMargin  = 0; end
+
+    Atr_PM_SaveSettings();
+
+    if (DEFAULT_CHAT_FRAME) then
+        if (gSB_VendorMarginOn and gSB_VendorMargin > 0) then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Vendor Margin filter on ("
+                .. Atr_Money(gSB_VendorMargin) .. ").");
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Vendor Margin filter off.");
+        end
+        if (gSB_CraftMarginOn) then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Crafted Goods Margin filter on ("
+                .. Atr_Money(gSB_CraftMargin) .. ").");
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Crafted Goods Margin filter off.");
+        end
+    end
+
+    if (Atr_ProfitMarginPopup) then Atr_ProfitMarginPopup:Hide(); end
     if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
+end
+
+-- SELL BROWSER: crafted-goods recipe harvest + cost ---------------------
+-- The 3.3.5 client cannot be asked "what reagents craft item X"; that data is
+-- only reachable while a profession window is open (GetTradeSkill* APIs).  So
+-- we HARVEST it: every time the player opens/refreshes a profession, we record
+-- each craftable item -> its reagents into AUCTIONATOR_CRAFT_RECIPES (account-
+-- wide).  The Crafted Goods Margin filter then knows the craft cost of anything
+-- the player can currently make.  Coverage grows as professions are opened.
+
+local function Atr_Craft_DB()
+    AUCTIONATOR_CRAFT_RECIPES = AUCTIONATOR_CRAFT_RECIPES or {};
+    return AUCTIONATOR_CRAFT_RECIPES;
+end
+
+-- Walk the currently-open trade skill and store every recipe we can read.
+function Atr_Craft_Harvest()
+    if (type(GetNumTradeSkills) ~= "function") then return; end
+    local n = GetNumTradeSkills() or 0;
+    if (n <= 0) then return; end
+
+    local db = Atr_Craft_DB();
+    local ItemID = (zc and zc.ItemIDfromLink) or nil;
+
+    for i = 1, n do
+        local _, skillType = GetTradeSkillInfo(i);
+        if (skillType and skillType ~= "header") then
+            local madeLink = GetTradeSkillItemLink and GetTradeSkillItemLink(i) or nil;
+            local madeID   = madeLink and ItemID and tonumber(ItemID(madeLink)) or nil;
+            if (madeID) then
+                local made = 1;
+                if (GetTradeSkillNumMade) then
+                    local lo = GetTradeSkillNumMade(i);
+                    made = tonumber(lo) or 1;
+                    if (made < 1) then made = 1; end
+                end
+
+                local reagents = {};
+                local numR = GetTradeSkillNumReagents and GetTradeSkillNumReagents(i) or 0;
+                for j = 1, numR do
+                    local _, _, rcount = GetTradeSkillReagentInfo(i, j);
+                    local rlink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(i, j) or nil;
+                    local rid   = rlink and ItemID and tonumber(ItemID(rlink)) or nil;
+                    if (rid) then
+                        table.insert(reagents, { id = rid, count = tonumber(rcount) or 1 });
+                    end
+                end
+
+                if (#reagents > 0) then
+                    db[madeID] = { made = made, reagents = reagents };
+                end
+            end
+        end
+    end
+end
+
+-- Per-item cost, in copper, to buy the reagents and craft `link`, or nil when
+-- it isn't a harvested recipe or a reagent price is missing.  Reagent price is
+-- Auctionator's auction price; when a reagent has no auction price (e.g. it is
+-- vendor-bought) we fall back to its vendor value as a rough floor.  If even
+-- that is unavailable (item not cached) the total is unknown, so we return nil
+-- and the caller leaves the item unfiltered.
+function Atr_Craft_GetCraftCost(link)
+    if (link == nil or AUCTIONATOR_CRAFT_RECIPES == nil) then return nil; end
+
+    local itemID;
+    if (type(link) == "number") then
+        itemID = link;
+    elseif (zc and zc.ItemIDfromLink) then
+        itemID = tonumber(zc.ItemIDfromLink(link));
+    end
+    if (itemID == nil) then return nil; end
+
+    local rec = AUCTIONATOR_CRAFT_RECIPES[itemID];
+    if (rec == nil or rec.reagents == nil) then return nil; end
+
+    local total = 0;
+    for _, r in ipairs(rec.reagents) do
+        local price = Atr_GetAuctionPrice and tonumber(Atr_GetAuctionPrice(r.id)) or nil;
+        if (price == nil or price <= 0) then
+            price = Atr_GetSellValue and tonumber(Atr_GetSellValue(r.id)) or nil;   -- vendor-value floor
+        end
+        if (price == nil or price <= 0) then
+            return nil;   -- a reagent we can't price -> craft cost unknown
+        end
+        total = total + (price * (r.count or 1));
+    end
+
+    local made = rec.made or 1;
+    if (made < 1) then made = 1; end
+    return math.floor(total / made);
+end
+
+-- Harvest whenever a profession window opens or refreshes.  A dedicated frame
+-- keeps this off the core event dispatcher.
+if (type(CreateFrame) == "function") then
+    local f = CreateFrame("Frame");
+    f:RegisterEvent("TRADE_SKILL_SHOW");
+    f:RegisterEvent("TRADE_SKILL_UPDATE");
+    f:SetScript("OnEvent", function() Atr_Craft_Harvest(); end);
 end
 
 -----------------------------------------
@@ -2538,17 +2747,13 @@ function Atr_ApplySellExpandedLayout()
             Atr_SellBrowser_Scan:SetFrameLevel ((Atr_HeadingsBar:GetFrameLevel() or 5) + 5);
             Atr_SellBrowser_Scan:Show();
 
-            -- The min. profit filter widgets are anchored (in XML) to the Scan
-            -- button, so they follow it here; they just need to be raised above
-            -- the headings-bar divider and shown alongside it.
+            -- The Profit Margin button is anchored (in XML) to the Scan button, so
+            -- it follows it here; it just needs to be raised above the headings-bar
+            -- divider and shown alongside it.
             local lvl = (Atr_HeadingsBar:GetFrameLevel() or 5) + 5;
-            if (Atr_SB_MinProfit) then
-                Atr_SB_MinProfit:SetFrameLevel (lvl);
-                Atr_SB_MinProfit:Show();
-            end
-            if (Atr_SB_MinProfitApply) then
-                Atr_SB_MinProfitApply:SetFrameLevel (lvl);
-                Atr_SB_MinProfitApply:Show();
+            if (Atr_SB_ProfitMargin) then
+                Atr_SB_ProfitMargin:SetFrameLevel (lvl);
+                Atr_SB_ProfitMargin:Show();
             end
         end
     end
@@ -2585,8 +2790,8 @@ function Atr_ResetSellExpandedLayout()
         Atr_SellBrowser_Scan:ClearAllPoints();
         Atr_SellBrowser_Scan:SetPoint ("TOPLEFT", Atr_SellBrowser, "BOTTOMLEFT", 0, -4);
     end
-    if (Atr_SB_MinProfit) then Atr_SB_MinProfit:Hide(); end
-    if (Atr_SB_MinProfitApply) then Atr_SB_MinProfitApply:Hide(); end
+    if (Atr_SB_ProfitMargin) then Atr_SB_ProfitMargin:Hide(); end
+    if (Atr_ProfitMarginPopup) then Atr_ProfitMarginPopup:Hide(); end
 
     if (Atr_SellControls_TexName) then Atr_SellControls_TexName:Show(); end
     if (Atr_SellDropZone) then Atr_SellDropZone:Hide(); end

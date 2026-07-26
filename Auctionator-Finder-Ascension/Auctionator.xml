@@ -538,26 +538,16 @@
 				<DisabledFont style="GameFontDisableSmall"/>
 			</Button>
 
-			<!-- Min. profit filter: currency input + apply button, right of Scan Inventory.
-			     Positioned/shown by the expanded SELL layout so it tracks the Scan button. -->
-			<Frame name="Atr_SB_MinProfit" inherits="MoneyInputFrameTemplate" hidden="true">
+			<!-- Profit Margin: opens the popup that holds the Vendor Margin and
+			     Crafted Goods Margin filters.  Sits right of Scan Inventory and is
+			     positioned/shown by the expanded SELL layout so it tracks that button. -->
+			<Button name="Atr_SB_ProfitMargin" inherits="UIPanelButtonTemplate" text="Profit Margin" hidden="true">
+				<Size><AbsDimension x="95" y="18"/></Size>
 				<Anchors>
 					<Anchor point="LEFT" relativeTo="Atr_SellBrowser_Scan" relativePoint="RIGHT"><Offset><AbsDimension x="12" y="0"/></Offset></Anchor>
 				</Anchors>
 				<Scripts>
-					<OnLoad>
-						Atr_SB_MinProfitGold:SetJustifyH("CENTER");
-					</OnLoad>
-				</Scripts>
-			</Frame>
-
-			<Button name="Atr_SB_MinProfitApply" inherits="UIPanelButtonTemplate" text="Set min. profit" hidden="true">
-				<Size><AbsDimension x="95" y="18"/></Size>
-				<Anchors>
-					<Anchor point="LEFT" relativeTo="Atr_SB_MinProfitCopper" relativePoint="RIGHT"><Offset><AbsDimension x="10" y="0"/></Offset></Anchor>
-				</Anchors>
-				<Scripts>
-					<OnClick>Atr_SB_ApplyMinProfit();</OnClick>
+					<OnClick>Atr_PM_Open();</OnClick>
 				</Scripts>
 				<NormalFont style="GameFontNormalSmall"/>
 				<HighlightFont style="GameFontHighlightSmall"/>
@@ -1503,6 +1493,97 @@
 
 
 
+	</Frame>
+
+
+
+	<!-- ================================================================= -->
+	<!-- Profit Margin popup: holds the Vendor Margin and Crafted Goods     -->
+	<!-- Margin filters, each with an enable checkbox and a threshold.      -->
+	<!-- Opened by the "Profit Margin" button on the SELL inventory browser.-->
+	<!-- ================================================================= -->
+	<Frame name="Atr_ProfitMarginPopup" parent="UIParent" frameStrata="DIALOG" toplevel="true" enableMouse="true" movable="true" hidden="true">
+		<Size><AbsDimension x="400" y="250"/></Size>
+		<Anchors><Anchor point="CENTER"/></Anchors>
+		<Backdrop bgFile="Interface\DialogFrame\UI-DialogBox-Background" edgeFile="Interface\DialogFrame\UI-DialogBox-Border" tile="true">
+			<BackgroundInsets><AbsInset left="11" right="12" top="12" bottom="11"/></BackgroundInsets>
+			<TileSize><AbsValue val="32"/></TileSize>
+			<EdgeSize><AbsValue val="32"/></EdgeSize>
+		</Backdrop>
+		<Layers>
+			<Layer level="ARTWORK">
+				<FontString name="Atr_PM_Title" inherits="GameFontNormalLarge" text="Profit Margins">
+					<Anchors><Anchor point="TOP"><Offset><AbsDimension x="0" y="-18"/></Offset></Anchor></Anchors>
+				</FontString>
+
+				<!-- Vendor Margin row -->
+				<FontString name="Atr_PM_VendorLabel" inherits="GameFontNormal" text="Vendor Margin">
+					<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="52" y="-56"/></Offset></Anchor></Anchors>
+				</FontString>
+				<FontString name="Atr_PM_VendorDesc" inherits="GameFontHighlightSmall" justifyH="LEFT">
+					<Size><AbsDimension x="230" y="24"/></Size>
+					<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="52" y="-74"/></Offset></Anchor></Anchors>
+				</FontString>
+
+				<!-- Crafted Goods Margin row -->
+				<FontString name="Atr_PM_CraftLabel" inherits="GameFontNormal" text="Crafted Goods Margin">
+					<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="52" y="-130"/></Offset></Anchor></Anchors>
+				</FontString>
+				<FontString name="Atr_PM_CraftDesc" inherits="GameFontHighlightSmall" justifyH="LEFT">
+					<Size><AbsDimension x="230" y="36"/></Size>
+					<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="52" y="-148"/></Offset></Anchor></Anchors>
+				</FontString>
+			</Layer>
+		</Layers>
+		<Frames>
+			<!-- Vendor Margin enable checkbox + threshold -->
+			<CheckButton name="Atr_PM_VendorCheck" inherits="UICheckButtonTemplate">
+				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-50"/></Offset></Anchor></Anchors>
+			</CheckButton>
+			<Frame name="Atr_PM_VendorMoney" inherits="MoneyInputFrameTemplate">
+				<Anchors><Anchor point="TOPRIGHT"><Offset><AbsDimension x="-24" y="-56"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnLoad>Atr_PM_VendorMoneyGold:SetJustifyH("CENTER");</OnLoad>
+				</Scripts>
+			</Frame>
+
+			<!-- Crafted Goods Margin enable checkbox + threshold -->
+			<CheckButton name="Atr_PM_CraftCheck" inherits="UICheckButtonTemplate">
+				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="20" y="-124"/></Offset></Anchor></Anchors>
+			</CheckButton>
+			<Frame name="Atr_PM_CraftMoney" inherits="MoneyInputFrameTemplate">
+				<Anchors><Anchor point="TOPRIGHT"><Offset><AbsDimension x="-24" y="-130"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnLoad>Atr_PM_CraftMoneyGold:SetJustifyH("CENTER");</OnLoad>
+				</Scripts>
+			</Frame>
+
+			<!-- Apply / Cancel -->
+			<Button name="Atr_PM_Apply" inherits="UIPanelButtonTemplate" text="Apply">
+				<Size><AbsDimension x="100" y="22"/></Size>
+				<Anchors><Anchor point="BOTTOM"><Offset><AbsDimension x="-56" y="18"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnClick>Atr_PM_Apply();</OnClick>
+				</Scripts>
+			</Button>
+			<Button name="Atr_PM_Cancel" inherits="UIPanelButtonTemplate" text="Cancel">
+				<Size><AbsDimension x="100" y="22"/></Size>
+				<Anchors><Anchor point="BOTTOM"><Offset><AbsDimension x="56" y="18"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnClick>Atr_PM_Cancel();</OnClick>
+				</Scripts>
+			</Button>
+		</Frames>
+		<Scripts>
+			<OnLoad>
+				self:RegisterForDrag("LeftButton");
+				if (Atr_PM_VendorDesc) then Atr_PM_VendorDesc:SetText("Sale price over vendoring, per item. Items below the threshold move to \"Not Profitable\"."); end
+				if (Atr_PM_CraftDesc) then Atr_PM_CraftDesc:SetText("For crafted items: auction price minus reagent cost. Items whose crafting margin is below the threshold move to \"Not Profitable\" (hold onto them)."); end
+			</OnLoad>
+			<OnDragStart>self:StartMoving();</OnDragStart>
+			<OnDragStop>self:StopMovingOrSizing();</OnDragStop>
+			<OnHide>self:StopMovingOrSizing();</OnHide>
+		</Scripts>
 	</Frame>
 
 
