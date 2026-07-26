@@ -42,6 +42,18 @@ UI that trusts the AH API's level values.
 - **Full Scan replacement** — upstream's `getAll` Full Scan is disabled by
   the server; the Finder replaces it with a sequential, per-category paged
   scan (gear deliberately refused, since the DB is name-keyed).
+- **Tooltip crafting help** — item tooltips (including the produced item in
+  an open profession window) show the reagent **Craft cost** and a green
+  **Craft profit** / red **Craft loss** line, comparing the item's auction
+  price to what its reagents cost.
+- **Random-suffix price estimate** — random-enchant gear ("Dreamdust
+  Slippers") is listed on the AH only under its rolled-suffix names
+  ("… of the Magus", "… of the Owl", …), so the name-keyed DB has no entry
+  for the bare base item — the exact case that makes crafted base gear read
+  "Auction: unknown". When the base name isn't listed directly, its auction
+  price is estimated as the **median across the suffixed variants** that are,
+  shown on tooltips as `~price (est) (n)`. This feeds the Sell tab and the
+  crafting help above, so base gear is priced instead of blank.
 
 For the full design, see the notes in [`Old Docs/`](Old%20Docs/) —
 especially [`FINDER-ARCHITECTURE.md`](Old%20Docs/FINDER-ARCHITECTURE.md),
