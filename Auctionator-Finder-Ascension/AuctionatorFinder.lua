@@ -2915,6 +2915,10 @@ function Fdr_PriceDB_Update (results, partial)
 		end
 	end
 
+	-- Feed changed the price DB: drop the suffix-variant estimate cache so base
+	-- gear estimates (Atr_GetAHVariantEstimate) reflect the new variant prices.
+	if (added + updated > 0 and Atr_AH_InvalidateVariantCache) then Atr_AH_InvalidateVariantCache (); end
+
 	if (added + updated > 0 and time) then
 		AUCTIONATOR_LAST_SCAN_TIME = time();					-- display-only; the real gate is CanSendAuctionQuery
 	end

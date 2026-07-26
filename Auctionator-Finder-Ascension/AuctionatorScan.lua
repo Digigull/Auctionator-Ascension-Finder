@@ -669,7 +669,11 @@ function AtrSearch:Finish()
 			end
 		end
 	end
-	
+
+	-- Targeted scan updated the price DB: drop the suffix-variant estimate cache
+	-- so base gear estimates (Atr_GetAHVariantEstimate) pick up the new prices.
+	if (Atr_AH_InvalidateVariantCache) then Atr_AH_InvalidateVariantCache (); end
+
 	Atr_ClearBrowseListings();
 	
 	gSortScansBy = self.sortHow;
@@ -1241,6 +1245,10 @@ function Atr_FullScanAnalyze()
     for name in pairs(gAtr_MeanDB) do
         table.sort(gAtr_MeanDB[name])
     end
+
+	-- Scan rewrote the price DB: drop the suffix-variant estimate cache so base
+	-- gear estimates (Atr_GetAHVariantEstimate) reflect the fresh prices.
+	if (Atr_AH_InvalidateVariantCache) then Atr_AH_InvalidateVariantCache (); end
 
 	gScanDetails.numBatchAuctions		= numBatchAuctions;
 	gScanDetails.totalItems				= totalItems;

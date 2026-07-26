@@ -213,10 +213,67 @@ end
 
 -----------------------------------------
 
+-- FINDER_TAB: AH price estimate for random-suffix base gear ---------------
+-- Random-enchant gear (e.g. "Dreamdust Slippers") is listed on the AH only
+-- under its rolled-suffix names ("Dreamdust Slippers of the Magus", "... of
+-- the Owl", ...), never under the bare base name.  So a lookup of the base
+-- name finds nothing even when the market is full of that item -- which is
+-- why crafted base gear shows "Auction: unknown" despite matching listings.
+--
+-- When a base name isn't listed directly we estimate its going price from the
+-- suffixed variants that ARE listed: gather every "<base> of ..." entry in the
+-- scan DB and take the median.  A crafted item rolls a random suffix, so the
+-- median across suffixes is a fair estimate of what a freshly-crafted one
+-- fetches.  The scan DB is name-keyed and can be large, so results are
+-- memoised per base name; the cache is dropped whenever a scan rewrites the DB
+-- (Atr_AH_InvalidateVariantCache, called from the scan finalisers).
+local gAHVariantEstCache = {};
+
+function Atr_AH_InvalidateVariantCache ()
+	gAHVariantEstCache = {};
+end
+
+-- Returns estimatedPrice, variantCount for a base item name, or nil when the
+-- scan DB holds no "<name> of ..." variants to estimate from.
+function Atr_GetAHVariantEstimate (itemName)
+	if (type (itemName) ~= "string" or itemName == "" or gAtr_ScanDB == nil) then return nil; end
+
+	local cached = gAHVariantEstCache[itemName];
+	if (cached ~= nil) then
+		if (cached == false) then return nil; end		-- memoised "no variants"
+		return cached.price, cached.count;
+	end
+
+	local prefix = itemName .. " of ";		-- random-suffix delimiter (enUS: "of the Owl", "of Intellect", ...)
+	local plen   = #prefix;
+	local prices = {};
+	for name, price in pairs (gAtr_ScanDB) do
+		if (type (price) == "number" and price > 0 and #name > plen and string.sub (name, 1, plen) == prefix) then
+			table.insert (prices, price);
+		end
+	end
+
+	if (#prices == 0) then
+		gAHVariantEstCache[itemName] = false;
+		return nil;
+	end
+
+	table.sort (prices);
+	local n = #prices;
+	local median;
+	if (n % 2 == 0) then median = (prices[n/2] + prices[n/2 + 1]) / 2; else median = prices[math.ceil (n/2)]; end
+	median = math.floor (median);
+
+	gAHVariantEstCache[itemName] = { price = median, count = n };
+	return median, n;
+end
+
+-----------------------------------------
+
 function Atr_GetAuctionPrice (item)  -- itemName or itemID
 
 	local itemName;
-	
+
 	if (type (item) == "number") then
 		itemName = GetItemInfo (item);
 	else
@@ -230,9 +287,21 @@ function Atr_GetAuctionPrice (item)  -- itemName or itemID
 	if (gAtr_ScanDB and gAtr_ScanDB[itemName]) then
 		return gAtr_ScanDB[itemName];
 	end
-	
-	return Atr_GetMostRecentSale (itemName);
-end	
+
+	local recent = Atr_GetMostRecentSale (itemName);
+	if (recent) then
+		return recent;
+	end
+
+	-- Random-suffix base gear isn't listed under its bare name; fall back to a
+	-- median estimate across its suffixed variants (see Atr_GetAHVariantEstimate).
+	local est = Atr_GetAHVariantEstimate (itemName);
+	if (est) then
+		return est;
+	end
+
+	return nil;
+end
 
 -----------------------------------------
 
@@ -1736,6 +1805,19 @@ local function ShowTipWithPricing (tip, link, num)
 	if (AUCTIONATOR_V_TIPS == 1) then vendorPrice	= itemVendorPrice; end;
 	if (AUCTIONATOR_A_TIPS == 1) then auctionPrice	= Atr_GetAuctionPrice (itemName); end;
     if (AUCTIONATOR_A_TIPS == 1) then auctionMedianPrice = Atr_GetMeanPrice (itemName); end;
+
+	-- FINDER_TAB: flag when the auction figure is a suffix-variant estimate
+	-- rather than a real listing for this name -- i.e. Atr_GetAuctionPrice fell
+	-- back to Atr_GetAHVariantEstimate because the base name isn't listed
+	-- directly (random-suffix gear like the crafted "Dreamdust Slippers").  Only
+	-- then do we render it as "~... (est)" so an estimate never reads as exact.
+	local auctionIsEst, auctionEstCount = false, nil;
+	if (AUCTIONATOR_A_TIPS == 1 and auctionPrice
+	    and not (gAtr_ScanDB and gAtr_ScanDB[itemName])
+	    and not (Atr_GetMostRecentSale and Atr_GetMostRecentSale (itemName))) then
+		local est, cnt = Atr_GetAHVariantEstimate (itemName);
+		if (est) then auctionIsEst = true; auctionEstCount = cnt; end
+	end
 	if (AUCTIONATOR_D_TIPS == 1) then dePrice		= Atr_CalcDisenchantPrice (itemType, itemRarity, itemLevel); end;
 
 	if (itemID and tipIlvl and itemVendorPrice and itemVendorPrice > 0 and itemLevel and itemLevel > 0) then		-- FINDER_TAB: every equipment sighting feeds the base-candidate registry
@@ -1852,6 +1934,10 @@ local function ShowTipWithPricing (tip, link, num)
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Auction"), auctionShown, bestPrice)..xstring,
 				"|cFFFFFFFF"..zc.priceToMoneyString (auctionPrice).."|cFFAAAAFF*|r"
 				..(agetxt and ("|cFF888888 "..agetxt.."|r") or ""));
+		elseif (auctionIsEst) then		-- FINDER_TAB: median across suffixed variants of an unlisted base name
+			local cnttxt = (auctionEstCount and auctionEstCount > 0) and ("|cFF888888 ("..auctionEstCount..")|r") or "";
+			tip:AddDoubleLine (Atr_TipLabel (ZT("Auction"), auctionShown, bestPrice)..xstring,
+				"|cFFBBBBBB~|r|cFFDDDDDD"..zc.priceToMoneyString (auctionPrice).."|r|cFFAAAAAA (est)|r"..cnttxt);
 		elseif (auctionPrice ~= nil) then
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Auction"), auctionShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (auctionPrice));
 		else
