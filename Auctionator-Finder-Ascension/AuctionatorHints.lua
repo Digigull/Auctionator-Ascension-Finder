@@ -1649,6 +1649,49 @@ function Atr_TipLabel (text, price, best)
 end
 -- FINDER_TAB end: highest-value tooltip label -----------------------------
 
+-- FINDER_TAB: crafted-goods profitability on item tooltips ----------------
+-- Adds "Craft cost" + "Craft profit"/"Craft loss" lines to a tooltip when the
+-- item is one we have a harvested recipe for.  Reagent cost comes from the
+-- SELL tab's craft DB (Atr_Craft_GetCraftCost, filled by opening profession
+-- windows and viewing recipe tooltips); the sell side is Auctionator's own
+-- auction price.  With a profession window open, hovering a craftable item
+-- then shows at a glance whether making it to sell is profitable or the raw
+-- materials cost more than the finished craft.
+--
+--   num / showStackPrices / xstring mirror the surrounding tooltip: when the
+--   rest of the tip is showing per-stack prices we scale both figures by the
+--   stack too, so the craft lines never disagree with the Auction line above.
+function Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xstring)
+
+	if (tip == nil or link == nil) then return; end
+	if (AUCTIONATOR_A_TIPS ~= 1) then return; end			-- comparison needs the auction price
+	if (type(Atr_Craft_GetCraftCost) ~= "function") then return; end
+
+	local craftCost = Atr_Craft_GetCraftCost (link, itemName);	-- per item, nil unless fully priceable
+	if (craftCost == nil or craftCost <= 0) then return; end
+
+	local sellPrice = (itemName and Atr_GetAuctionPrice) and tonumber (Atr_GetAuctionPrice (itemName)) or nil;
+	if (sellPrice == nil or sellPrice <= 0) then return; end	-- no market price to compare against yet
+
+	xstring = xstring or "";
+
+	-- Match the stack scaling the rest of the tooltip used (see the Auction line).
+	if (num and showStackPrices) then
+		craftCost = craftCost * num;
+		sellPrice = sellPrice * num;
+	end
+
+	local margin = sellPrice - craftCost;
+
+	tip:AddDoubleLine (ZT("Craft cost")..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (craftCost));
+	if (margin >= 0) then
+		tip:AddDoubleLine (ZT("Craft profit")..xstring, "|cFF44FF44"..zc.priceToMoneyString (margin).."|r");
+	else
+		tip:AddDoubleLine (ZT("Craft loss")..xstring, "|cFFFF4444-"..zc.priceToMoneyString (-margin).."|r");
+	end
+end
+-- FINDER_TAB end: crafted-goods profitability -----------------------------
+
 local function ShowTipWithPricing (tip, link, num)
 
 	if (link == nil) then
@@ -1840,6 +1883,18 @@ local function ShowTipWithPricing (tip, link, num)
 	if (showDetails and dePrice ~= nil) then
 		Atr_AddDEDetailsToTip (tip, itemType, itemRarity, itemLevel, Atr_DEReqLevel(itemID));
 	end
+
+	-- crafted-goods profitability
+	--
+	-- FINDER_TAB: for any item we have a harvested recipe for (see
+	-- Atr_Craft_GetCraftCost / Atr_Craft_Harvest), compare its current auction
+	-- price to what the reagents cost to craft.  With a profession window open
+	-- and hovering the produced item, this tells you at a glance whether
+	-- crafting to sell turns a profit or the raw materials cost more than the
+	-- finished craft would fetch.  Gated on Auction tips being on, since the
+	-- comparison needs the auction price; only appears for craftable items
+	-- whose reagents we can fully price, so normal tooltips stay untouched.
+	Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xstring);
 
 	tip:Show()
 
