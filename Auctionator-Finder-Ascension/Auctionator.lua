@@ -205,6 +205,9 @@ local gSB_Scanning   = false;     -- a "Scan Prices" run over the inventory is i
 local gSB_ScanNames  = {};        -- distinct item names queued for the current scan
 local gSB_ScanIdx    = 0;         -- index into gSB_ScanNames of the name being scanned
 local gSB_ScanFeedOff = false;    -- a scan finished but the price feed was disabled
+local gSB_MinProfit  = 0;         -- "Set min. profit" filter, in copper; 0 = filter off.
+                                  -- Items whose best-method gain over vendoring is below
+                                  -- this are moved to a "Not Profitable" bucket at the bottom.
 
 -- SELL tab enlarged layout state
 local gSellLayoutExpandedApplied = false;
@@ -1670,11 +1673,18 @@ function Atr_SB_Build()
     -- being mis-bucketed as Vendor/Disenchant on incomplete data.
     local M_AUCTION, M_VENDOR, M_DE, M_UNPRICED = "Auction", "Vendor", "Disenchant", "Unpriced";
     local METHOD_ORDER = { M_AUCTION, M_VENDOR, M_DE, M_UNPRICED };
+    local NOT_PROFITABLE = "Not Profitable";
 
+    -- Returns the best selling method AND the per-item "profit": how much more the
+    -- best method yields than simply vendoring the item.  For the Auction bucket
+    -- that is (AH price - vendor); for Disenchant (DE value - vendor); for Vendor
+    -- itself it is 0 (vendoring gains nothing over vendoring).  Unpriced items have
+    -- no known AH price, so profit is unknown (returned as nil) and they are never
+    -- swept into "Not Profitable" -- a scan has to fill their price first.
     local function Atr_SB_BestMethod(link, name)
         local ah = (name and Atr_GetAuctionPrice) and Atr_GetAuctionPrice(name) or nil;
         ah = tonumber(ah) or 0;
-        if (ah <= 0) then return M_UNPRICED; end     -- not scanned / no listings yet
+        if (ah <= 0) then return M_UNPRICED, nil; end   -- not scanned / no listings yet
 
         local vendor = Atr_GetSellValue and Atr_GetSellValue(link) or select(11, GetItemInfo(link));
         vendor = tonumber(vendor) or 0;
@@ -1686,10 +1696,11 @@ function Atr_SB_Build()
         local best, method = vendor, M_VENDOR;
         if (de > best) then best, method = de, M_DE; end
         if (ah >= best) then best, method = ah, M_AUCTION; end
-        return method;
+        return method, (best - vendor);
     end
 
     local categories = {};   -- categories[cat] = { count, methods = { [m] = { count, items } } }
+    local notProfit  = { count = 0, items = {} };   -- filtered-out items, rendered last
 
     for bag = 0, NUM_BAG_SLOTS do
         local numSlots = GetContainerNumSlots(bag) or 0;
@@ -1701,13 +1712,23 @@ function Atr_SB_Build()
                 local classIdx = sType and Atr_ItemType2AuctionClass(sType) or 0;
                 if (classIdx) then
                     local cat = sType or ZT("Other");
-                    local method = Atr_SB_BestMethod(link, name);
-                    if (not categories[cat]) then categories[cat] = { count = 0, methods = {} }; end
-                    local mc = categories[cat].methods;
-                    if (not mc[method]) then mc[method] = { count = 0, items = {} }; end
-                    table.insert(mc[method].items, { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1 });
-                    mc[method].count = mc[method].count + (itemCount or 1);
-                    categories[cat].count = categories[cat].count + (itemCount or 1);
+                    local method, profit = Atr_SB_BestMethod(link, name);
+                    local tile = { bag=bag, slot=slot, icon=texture or icon, count=itemCount or 1 };
+                    -- Min. profit filter: a priced item whose best method beats
+                    -- vendoring by less than the threshold is not worth listing, so
+                    -- it drops into the "Not Profitable" bucket instead of its normal
+                    -- category.  Unpriced items (profit == nil) are always left alone.
+                    if (gSB_MinProfit > 0 and profit ~= nil and profit < gSB_MinProfit) then
+                        table.insert(notProfit.items, tile);
+                        notProfit.count = notProfit.count + (itemCount or 1);
+                    else
+                        if (not categories[cat]) then categories[cat] = { count = 0, methods = {} }; end
+                        local mc = categories[cat].methods;
+                        if (not mc[method]) then mc[method] = { count = 0, items = {} }; end
+                        table.insert(mc[method].items, tile);
+                        mc[method].count = mc[method].count + (itemCount or 1);
+                        categories[cat].count = categories[cat].count + (itemCount or 1);
+                    end
                 end
             end
         end
@@ -1807,6 +1828,14 @@ function Atr_SB_Build()
         contentHeight = contentHeight + 4;
     end
 
+    -- "Not Profitable" always sorts last: items the min. profit filter swept out.
+    if (#notProfit.items > 0) then
+        addHeader(string.format("%s (%d)", NOT_PROFITABLE, notProfit.count));
+        renderTiles(notProfit.items);
+        y = y - 4;
+        contentHeight = contentHeight + 4;
+    end
+
     Atr_SB_Content:SetHeight(math.max(10, contentHeight));
     if (Atr_SellBrowser and gSB_Visible) then Atr_Sell_EnsureBrowser(); end
 end
@@ -1821,6 +1850,8 @@ function Atr_SB_Toggle()
         if (Atr_SellBrowser_Toggle) then Atr_SellBrowser_Toggle:SetText("Inventory"); end
         if (Atr_SellBrowser) then Atr_SellBrowser:Hide(); end
         if (Atr_SellBrowser_Scan) then Atr_SellBrowser_Scan:Hide(); end
+        if (Atr_SB_MinProfit) then Atr_SB_MinProfit:Hide(); end
+        if (Atr_SB_MinProfitApply) then Atr_SB_MinProfitApply:Hide(); end
         if (Atr_SellControls) then Atr_SellControls:Show(); end
     end
 end
@@ -1957,6 +1988,28 @@ function Atr_SB_ScanPrices()
     gSB_ScanFeedOff = false;
     gSB_Scanning = true;
     Atr_SB_ScanNext();
+end
+
+-- SELL BROWSER: "Set min. profit" filter ------------------------------
+-- Reads the currency input next to Scan Inventory and rebuilds the browser.
+-- A value of 0 (empty box) clears the filter, so the same button both sets
+-- and clears it.  Profit here is per item: how much the best selling method
+-- beats vendoring by (see Atr_SB_BestMethod).
+function Atr_SB_ApplyMinProfit()
+    if (Atr_SB_MinProfit and MoneyInputFrame_GetCopper) then
+        gSB_MinProfit = tonumber(MoneyInputFrame_GetCopper(Atr_SB_MinProfit)) or 0;
+    end
+    if (gSB_MinProfit < 0) then gSB_MinProfit = 0; end
+    if (DEFAULT_CHAT_FRAME) then
+        if (gSB_MinProfit > 0) then
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Min. profit filter set to "
+                .. (Atr_Bz_MoneyString and Atr_Bz_MoneyString(gSB_MinProfit) or (gSB_MinProfit .. "c"))
+                .. " - items below it move to \"Not Profitable\".");
+        else
+            DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Min. profit filter cleared.");
+        end
+    end
+    if (gSB_Visible and Atr_SellBrowser and Atr_SellBrowser:IsShown()) then Atr_SB_Build(); end
 end
 
 -----------------------------------------
@@ -2354,6 +2407,19 @@ function Atr_ApplySellExpandedLayout()
             Atr_SellBrowser_Scan:SetPoint ("TOPLEFT", Atr_HeadingsBar, "TOPLEFT", -32, ATR_SELL_SCANBTN_Y);
             Atr_SellBrowser_Scan:SetFrameLevel ((Atr_HeadingsBar:GetFrameLevel() or 5) + 5);
             Atr_SellBrowser_Scan:Show();
+
+            -- The min. profit filter widgets are anchored (in XML) to the Scan
+            -- button, so they follow it here; they just need to be raised above
+            -- the headings-bar divider and shown alongside it.
+            local lvl = (Atr_HeadingsBar:GetFrameLevel() or 5) + 5;
+            if (Atr_SB_MinProfit) then
+                Atr_SB_MinProfit:SetFrameLevel (lvl);
+                Atr_SB_MinProfit:Show();
+            end
+            if (Atr_SB_MinProfitApply) then
+                Atr_SB_MinProfitApply:SetFrameLevel (lvl);
+                Atr_SB_MinProfitApply:Show();
+            end
         end
     end
     if (AuctionatorScrollFrame) then
@@ -2389,6 +2455,8 @@ function Atr_ResetSellExpandedLayout()
         Atr_SellBrowser_Scan:ClearAllPoints();
         Atr_SellBrowser_Scan:SetPoint ("TOPLEFT", Atr_SellBrowser, "BOTTOMLEFT", 0, -4);
     end
+    if (Atr_SB_MinProfit) then Atr_SB_MinProfit:Hide(); end
+    if (Atr_SB_MinProfitApply) then Atr_SB_MinProfitApply:Hide(); end
 
     if (Atr_SellControls_TexName) then Atr_SellControls_TexName:Show(); end
     if (Atr_SellDropZone) then Atr_SellDropZone:Hide(); end
