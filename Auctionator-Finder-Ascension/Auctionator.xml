@@ -913,17 +913,16 @@
 							<TexCoords left="0.1953125" right="0.8046875" top="0" bottom="1"/>
 						</Texture>
 
-						<FontString name="Atr_Col1_Heading" inherits="GameFontHighlightSmall" text="Item Price" hidden="true" justifyH="CENTER">
-							<Size><AbsDimension x="100"/></Size>
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="40" y="1"/></Offset></Anchor></Anchors>
+						<FontString name="Atr_Col1_Heading" inherits="GameFontHighlightSmall" text="Item Price" hidden="true" justifyH="RIGHT">
+							<Anchors><Anchor point="RIGHT" relativePoint="RIGHT" relativeTo="$parentMiddle"><Offset><AbsDimension x="-305" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 
-						<FontString name="Atr_Col3_Heading" inherits="GameFontHighlightSmall" text="Current Auctions" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="175" y="1"/></Offset></Anchor></Anchors>
+						<FontString name="Atr_Col3_Heading" inherits="GameFontHighlightSmall" text="Current Auctions" hidden="true" justifyH="RIGHT">
+							<Anchors><Anchor point="RIGHT" relativePoint="RIGHT" relativeTo="$parentMiddle"><Offset><AbsDimension x="-175" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 
-						<FontString name="Atr_Col4_Heading" inherits="GameFontHighlightSmall" text="Total Price" hidden="true">
-							<Anchors><Anchor point="LEFT" relativePoint="LEFT" relativeTo="$parentMiddle"><Offset><AbsDimension x="500" y="1"/></Offset></Anchor></Anchors>
+						<FontString name="Atr_Col4_Heading" inherits="GameFontHighlightSmall" text="Total Price" hidden="true" justifyH="RIGHT">
+							<Anchors><Anchor point="RIGHT" relativePoint="RIGHT" relativeTo="$parentMiddle"><Offset><AbsDimension x="-45" y="1"/></Offset></Anchor></Anchors>
 						</FontString>
 					</Layer>
 				</Layers>
