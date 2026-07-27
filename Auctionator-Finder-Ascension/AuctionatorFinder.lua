@@ -3388,11 +3388,165 @@ local function Fdr_ResearchMsg (s)
 end
 
 
-local function Fdr_ResearchMoney (c)
+-- Plain money (no colour codes or coin textures) so the copy window pastes
+-- cleanly out of the game.
+local function Fdr_ResearchMoneyPlain (c)
 
-	if (c == nil) then return "bid-only"; end
-	if (zc and zc.priceToMoneyString) then return zc.priceToMoneyString (c); end
-	return tostring (c).."c";
+	if (c == nil) then return "no buyout"; end
+
+	local g  = math.floor (c / 10000);
+	local s  = math.floor ((c % 10000) / 100);
+	local cp = c % 100;
+
+	local out = "";
+	if (g > 0) then out = g.."g"; end
+	if (s > 0) then out = out..((out ~= "") and " " or "")..s.."s"; end
+	if (cp > 0 or out == "") then out = out..((out ~= "") and " " or "")..cp.."c"; end
+	return out;
+end
+
+
+-- Build the whole report as PLAIN-TEXT lines - one string per line, no colour
+-- codes.  Used both for the copy window (joined with newlines) and for the chat
+-- fallback (printed line by line where there is no real UI).
+local function Fdr_Research_BuildLines (t, db, anchor, limit)
+
+	local nitems = 0;
+	for _ in pairs (db.items) do nitems = nitems + 1; end
+
+	local lines = {};
+	tinsert (lines, "Finder research: "..nitems.." scaled items tracked across "..(db.scans or 0).." scans");
+	if (anchor) then
+		tinsert (lines, "prioritising gear near level "..anchor.."  (use  /atrtarget "..limit.." <level>  to aim at another band)");
+	end
+
+	if (#t == 0) then
+		tinsert (lines, "");
+		tinsert (lines, "no candidates yet - scan a cheap low-level gear category, then run /atrtarget again");
+		return lines;
+	end
+
+	local i;
+	for i = 1, #t do
+
+		local e    = t[i];
+		local want = Fdr_Research_Wants (e);
+
+		local relnote = "";
+		if (anchor and e.relevance and e.relevance < 1) then
+			relnote = string.format ("  (level relevance x%.2f)", e.relevance);
+		end
+
+		tinsert (lines, "");
+		tinsert (lines, string.format ("%d. %s  (id %d)  score %.1f%s",
+						i, e.name, e.id, e.score, relnote));
+		tinsert (lines, string.format ("   %d unmapped of %d levels, %d confirmed rung%s, seen %dx over %d scans",
+						e.unmapped, e.variants, e.rungs, (e.rungs == 1) and "" or "s", e.seen, e.scans));
+
+		local parts = {};
+		local j;
+		for j = 1, #want do		-- the window scrolls, so list every buyable level, not just six
+			local w   = want[j];
+			local tag = "req"..w.rq..(w.down and "!" or "").." ";
+			if (w.b) then		tag = tag..Fdr_ResearchMoneyPlain (w.b);
+			elseif (w.mb) then	tag = tag.."bid "..Fdr_ResearchMoneyPlain (w.mb);
+			else				tag = tag.."no price"; end
+			tinsert (parts, tag);
+		end
+		tinsert (lines, "   buy: "..table.concat (parts, "   "));
+	end
+
+	tinsert (lines, "");
+	tinsert (lines, "! = below this item's base level (down region - highest value);  bid = no buyout, must be won on a bid");
+	return lines;
+end
+
+
+-- The copy window: a plain multiline EditBox inside a scroll frame, pre-selected
+-- so the text is ready for Ctrl+C the instant it opens.  When the client exposes
+-- the native CopyToClipboard (it does on Ascension - see ASCENSION-CLIENT-NOTES)
+-- a one-click button is added too.  Returns false where there is no real UI (a
+-- headless client or the test harness), so the caller falls back to chat.
+function Atr_Finder_ShowResearchCopy (text)
+
+	if (type (CreateFrame) ~= "function") then return false; end
+
+	local f = Atr_Finder_ResearchCopyFrame;
+	if (not f) then
+
+		f = CreateFrame ("Frame", "Atr_Finder_ResearchCopyFrame", UIParent);
+		f:SetWidth (600);
+		f:SetHeight (440);
+		f:SetPoint ("CENTER");
+		f:SetFrameStrata ("DIALOG");
+		if (f.SetToplevel) then f:SetToplevel (true); end
+		Fdr_StyleDialog (f);
+		f:EnableMouse (true);
+		f:SetMovable (true);
+		f:RegisterForDrag ("LeftButton");
+		f:SetScript ("OnDragStart", function (self) self:StartMoving (); end);
+		f:SetScript ("OnDragStop",  function (self) self:StopMovingOrSizing (); end);
+
+		local title = f:CreateFontString (nil, "ARTWORK", "GameFontNormalLarge");
+		title:SetPoint ("TOP", 0, -14);
+		title:SetText ("Finder Research Targets");
+
+		local hint = f:CreateFontString (nil, "ARTWORK", "GameFontHighlightSmall");
+		hint:SetPoint ("TOP", 0, -36);
+		hint:SetText ("Text is selected - press Ctrl+C to copy.  Esc closes the window.");
+
+		local close = CreateFrame ("Button", "$parentClose", f, "UIPanelCloseButton");
+		close:SetPoint ("TOPRIGHT", -4, -4);
+
+		local sf = CreateFrame ("ScrollFrame", "Atr_Finder_ResearchCopyScroll", f, "UIPanelScrollFrameTemplate");
+		sf:SetPoint ("TOPLEFT", 16, -56);
+		sf:SetPoint ("BOTTOMRIGHT", -34, 44);
+		sf:EnableMouseWheel (true);
+		sf:SetScript ("OnMouseWheel", function (self, delta)
+			local v    = self:GetVerticalScroll () - (delta * 28);
+			local maxv = self:GetVerticalScrollRange ();
+			if (v < 0) then v = 0; elseif (v > maxv) then v = maxv; end
+			self:SetVerticalScroll (v);
+		end);
+
+		local eb = CreateFrame ("EditBox", "Atr_Finder_ResearchCopyEdit", sf);
+		eb:SetMultiLine (true);
+		eb:SetAutoFocus (false);
+		eb:SetFontObject (ChatFontNormal);
+		eb:SetWidth (540);
+		eb:SetScript ("OnEscapePressed", function (self) self:ClearFocus (); f:Hide (); end);
+		sf:SetScrollChild (eb);
+		f.edit = eb;
+
+		-- native one-click copy, when the client provides it
+		if (type (CopyToClipboard) == "function") then
+			local cp = CreateFrame ("Button", "$parentCopy", f, "UIPanelButtonTemplate");
+			cp:SetWidth (150);
+			cp:SetHeight (22);
+			cp:SetPoint ("BOTTOM", 0, 14);
+			cp:SetText ("Copy to clipboard");
+			cp:SetScript ("OnClick", function ()
+				CopyToClipboard (f.edit:GetText () or "");
+				if (zc and zc.msg_atr) then zc.msg_atr ("research list copied to clipboard"); end
+			end);
+		end
+
+		if (type (UISpecialFrames) == "table") then
+			tinsert (UISpecialFrames, "Atr_Finder_ResearchCopyFrame");	-- Esc closes it
+		end
+	end
+
+	f.edit:SetText (text or "");
+
+	-- grow the edit box to the content height so the scroll frame can scroll it
+	local _, nl = tostring (text or ""):gsub ("\n", "\n");
+	f.edit:SetHeight (math.max (340, (nl + 2) * 14));
+
+	f:Show ();
+	f.edit:SetCursorPosition (0);
+	f.edit:SetFocus ();
+	f.edit:HighlightText ();
+	return true;
 end
 
 
@@ -3404,51 +3558,18 @@ function Fdr_Research_Report (limit, levelOverride)
 	local anchor = Fdr_Research_Anchor (levelOverride);
 	local t      = Fdr_Research_Targets (limit, anchor);
 
-	local nitems = 0;
-	for _ in pairs (db.items) do nitems = nitems + 1; end
+	local lines  = Fdr_Research_BuildLines (t, db, anchor, limit);
+	local text   = table.concat (lines, "\n");
 
-	Fdr_ResearchMsg ("Finder research: "..nitems.." scaled items tracked across "..(db.scans or 0).." scans");
-
-	if (anchor) then
-		Fdr_ResearchMsg ("prioritising gear near level "..anchor
-						.." - use |cffffffff/atrtarget "..limit.." <level>|r to aim at another band");
+	-- Prefer the copy window; fall back to chat where there is no real UI.
+	if (Atr_Finder_ShowResearchCopy (text)) then
+		Fdr_ResearchMsg (#t.." research target"..((#t == 1) and "" or "s")
+						.." - opened the copy window (Ctrl+C to copy)"
+						..(anchor and (", gear near level "..anchor) or ""));
+	else
+		local i;
+		for i = 1, #lines do Fdr_ResearchMsg (lines[i]); end
 	end
-
-	if (#t == 0) then
-		Fdr_ResearchMsg ("no candidates yet - scan a cheap low-level gear category, then run /atrtarget again");
-		return t;
-	end
-
-	local i;
-	for i = 1, #t do
-
-		local e    = t[i];
-		local want = Fdr_Research_Wants (e);
-		local parts = {};
-
-		local j;
-		for j = 1, math.min (#want, 6) do
-			local w   = want[j];
-			local tag = "req"..w.rq..(w.down and "|cff40ff40!|r" or "").." ";
-			if (w.b) then		tag = tag..Fdr_ResearchMoney (w.b);
-			elseif (w.mb) then	tag = tag.."|cffffcc00bid "..Fdr_ResearchMoney (w.mb).."|r";
-			else				tag = tag.."|cff888888no price|r"; end
-			tinsert (parts, tag);
-		end
-
-		local relnote = "";
-		if (anchor and e.relevance and e.relevance < 1) then
-			relnote = string.format ("  |cff888888(level relevance x%.2f)|r", e.relevance);
-		end
-
-		Fdr_ResearchMsg (string.format ("%d. %s |cff888888(id %d)|r  score %.1f - %d unmapped of %d levels, %d confirmed rung%s, seen %dx over %d scans",
-						i, e.name, e.id, e.score, e.unmapped, e.variants,
-						e.rungs, (e.rungs == 1) and "" or "s", e.seen, e.scans) .. relnote);
-		Fdr_ResearchMsg ("     buy: "..table.concat (parts, "   ")
-						..((#want > 6) and ("   |cff888888(+"..(#want - 6).." more)|r") or ""));
-	end
-
-	Fdr_ResearchMsg ("|cff40ff40!|r = below this item's base level (down region - highest value); |cffffcc00bid|r = no buyout, must be won on a bid");
 
 	return t;
 end
