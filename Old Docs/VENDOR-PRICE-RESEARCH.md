@@ -970,7 +970,7 @@ component is printed, so a bad ranking can be diagnosed instead of
 guessed at.  An item whose only remaining unmapped levels are bid-only
 drops off the list entirely - there is nothing to tell the user to buy.
 
-Output: **`/atrtarget [n]`** prints the ranked shopping list in game
+Output: **`/atrtarget [n] [level]`** prints the ranked shopping list in game
 (item, id, score, unmapped-of-total, existing rungs, and the exact
 required levels to buy with their cheapest seen price; `!` marks
 down-region levels).  The Finder's old dead **Debug** checkbox is
@@ -978,6 +978,49 @@ relabelled **Research** and now writes the ranked report alongside the
 raw scan rows into `AUCTIONATOR_FINDER_DEBUG`, making the stub addon the
 upload channel.  The ledger itself is always collected; the checkbox
 only controls the upload file.  Harness24.
+
+### SHIPPED: level-band relevance (2026-07)
+
+The value/gold ranking above answers "most research per gold", which floats
+cheap low-level ladders to the top.  That is the wrong shopping list for the
+common case: a player - levelling or at max - who just wants the vendor
+ESTIMATE to be right for the gear they actually see at their CURRENT level.
+The live calibration data made the cost of this concrete - replayed against
+the shipped estimator, out-of-sample error rises sharply with level because
+the high-level population lands almost entirely in the stage-4 `est` tier
+(no confirmed rungs of its own; rung interpolation fired zero times), and
+`est` is weakest in exactly the rising-curve and down regions a high-level
+character keeps hitting:
+
+    by required level (proxy for character level):  rq40-49 median  6%
+                                                     rq50-59 median 21%
+    tier mix of recent sales:  est 74% (median ~19%),  interp 0%
+
+So the fix is not more model - it is aiming the existing shopping list at the
+band the player is in, so the items they browse gain their own rungs (`est`
+-> `interp`).  `Fdr_Research_Targets (limit, anchor)` now takes an anchor
+level; `/atrtarget` supplies the character level by default (`UnitLevel`), or
+an explicit `/atrtarget <n> <level>` override for aiming elsewhere.  Two crude,
+readable, printed additions to the ranking, applied only when an anchor is set
+(the offline dump passes none, so the uploaded ledger stays a full unbiased
+view):
+
+    band window   [anchor-8, anchor+4]   gear at/just below you, plus next upgrades
+    in-band first PRIMARY sort key        a target with a buyable variant in the
+                                          window always outranks one without
+    inBand x 12   value bonus per unmapped level inside the window
+    cost          = cheapest unmapped buyout INSIDE the window (what you would
+                    actually spend), falling back to overall cheapest
+    relevance     score x (1 - dist/25, floored at 0.25) for the out-of-band
+                    tail, so nearer targets edge out farther ones
+
+The estimator model itself is untouched - this is ranking only, so there is no
+accuracy regression risk.  Verified by a focused harness that loads the real
+file and asserts: no-anchor ranking is byte-for-byte the old behaviour; an
+anchor promotes in-band targets above cheap out-of-band ladders; a max-level
+anchor pulls high gear in-band; and the `/atrtarget <n> <level>` override
+retargets the band.  (The documented harness suite is not committed to this
+repo; the check lives with the change.)
 
 ### Live finding: the wildcard-scan lesson, and bid-only listings (2026-07)
 

@@ -3212,7 +3212,50 @@ end
 -- waiting out the auction and possibly losing it.
 local FDR_RESEARCH_BID_PENALTY = 0.6;		-- bid-only targets are real, but slower and not guaranteed
 
-function Fdr_Research_Targets (limit)
+-- Level-band relevance (2026-07).  The value/gold score above answers "what is
+-- the most research per gold", which floats cheap low-level ladders to the top.
+-- That is the wrong shopping list for the common case: a player - levelling or
+-- at max - who wants the vendor ESTIMATE to be right for the gear they actually
+-- see at their current level.  When an anchor level is supplied (the character
+-- level by default, or an explicit /atrtarget override), a target whose unmapped
+-- required levels sit in a window around it keeps its full score; targets that
+-- sit further off fade towards a floor, so an exceptional out-of-band ladder
+-- still appears but is demoted.  anchor == nil (the offline dump) leaves the
+-- ranking untouched, so the uploaded research file stays a full ledger view.
+local FDR_RESEARCH_BAND_BELOW = 8;		-- gear at/just below your level is what you wear and price
+local FDR_RESEARCH_BAND_ABOVE = 4;		-- a little above: the next upgrades you would buy
+local FDR_RESEARCH_BAND_FADE  = 25;		-- levels from the window edge over which relevance fades to the floor
+local FDR_RESEARCH_BAND_FLOOR = 0.25;	-- out-of-band targets keep this fraction of their score
+local FDR_RESEARCH_BAND_BONUS = 12;		-- value added per unmapped level that sits IN the band
+
+-- how far a required level sits OUTSIDE the band window around anchor (0 = inside)
+local function Fdr_Research_BandDist (anchor, rq)
+	local lo = anchor - FDR_RESEARCH_BAND_BELOW;
+	local hi = anchor + FDR_RESEARCH_BAND_ABOVE;
+	if (rq < lo) then return lo - rq; end
+	if (rq > hi) then return rq - hi; end
+	return 0;
+end
+
+local function Fdr_Research_Relevance (dist)
+	local r = 1 - (dist / FDR_RESEARCH_BAND_FADE);
+	if (r < FDR_RESEARCH_BAND_FLOOR) then return FDR_RESEARCH_BAND_FLOOR; end
+	return r;
+end
+
+-- the anchor level for /atrtarget: an explicit override wins, else the live
+-- character level; nil when neither is available (no weighting - e.g. the
+-- offline dump, or a test env with no UnitLevel)
+local function Fdr_Research_Anchor (override)
+	if (override and override > 0) then return override; end
+	if (type (UnitLevel) == "function") then
+		local L = UnitLevel ("player");
+		if (L and L > 0) then return L; end
+	end
+	return nil;
+end
+
+function Fdr_Research_Targets (limit, anchor)
 
 	limit = limit or 12;
 
@@ -3226,8 +3269,9 @@ function Fdr_Research_Targets (limit)
 			local known, lowRq, rungs = Fdr_Research_Known (id);
 			local floor = Fdr_Research_Floor (lowRq, it.brq);
 
-			local variants, unmapped, down = 0, 0, 0;
-			local minRq, maxRq, cheap, cheapRq, bid, bidRq;
+			local variants, unmapped, down, inBand = 0, 0, 0, 0;
+			local minRq, maxRq, cheap, cheapRq, bid, bidRq, bandDist;
+			local cheapIB, cheapIBRq;		-- cheapest unmapped buyout INSIDE the level band
 
 			for rq, v in pairs (it.v) do
 
@@ -3240,11 +3284,28 @@ function Fdr_Research_Targets (limit)
 					if (floor and rq < floor) then down = down + 1; end
 					if (v.b  and (cheap == nil or v.b  < cheap)) then cheap = v.b;  cheapRq = rq; end
 					if (v.mb and (bid   == nil or v.mb < bid))   then bid   = v.mb; bidRq   = rq; end
+					-- relevance is judged on the UNMAPPED levels - the ones actually worth
+					-- buying.  bandDist is how close the NEAREST buyable level is; inBand
+					-- counts how MANY sit in the window (an item offering several buyable
+					-- levels at your level does more for the tooltips you see than one that
+					-- merely grazes the band), and cheapIB is what you would actually spend
+					-- to buy one at your level.
+					if (anchor) then
+						local d = Fdr_Research_BandDist (anchor, rq);
+						if (bandDist == nil or d < bandDist) then bandDist = d; end
+						if (d == 0) then
+							inBand = inBand + 1;
+							if (v.b and (cheapIB == nil or v.b < cheapIB)) then cheapIB = v.b; cheapIBRq = rq; end
+						end
+					end
 				end
 			end
 
 			local cost, costRq, bidOnly = cheap, cheapRq, false;
 			if (cost == nil and bid) then cost = bid; costRq = bidRq; bidOnly = true; end
+			-- when anchored, price the item by the cheapest variant AT your level, so the
+			-- score reflects the buy you would actually make (falls back to overall cheapest)
+			if (anchor and cheapIB) then cost = cheapIB; costRq = cheapIBRq; bidOnly = false; end
 
 			if (unmapped > 0 and cost) then
 
@@ -3253,24 +3314,42 @@ function Fdr_Research_Targets (limit)
 							 + down * 30
 							 + ((rungs > 0) and 25 or 0)
 							 + math.min (spread, 30)
-							 + math.min ((it.sc or 0) * 4, 20);
+							 + math.min ((it.sc or 0) * 4, 20)
+							 + (anchor and (inBand * FDR_RESEARCH_BAND_BONUS) or 0);
 
 				local score = value / (1 + (cost / 10000));
 				if (bidOnly) then score = score * FDR_RESEARCH_BID_PENALTY; end
+
+				local relevance = 1;
+				if (anchor and bandDist) then
+					relevance = Fdr_Research_Relevance (bandDist);
+					score = score * relevance;
+				end
 
 				tinsert (out, { id = id, name = it.n or ("item:"..id),
 								value = value, score = score,
 								cost = cost, costRq = costRq, bidOnly = bidOnly,
 								unmapped = unmapped, variants = variants, down = down,
 								seen = it.seen or 0, scans = it.sc or 0,
-								spread = spread, rungs = rungs,
+								spread = spread, rungs = rungs, inBand = inBand,
+								relevance = relevance, bandDist = bandDist,
 								minRq = minRq, maxRq = maxRq, floor = floor,
 								item = it, known = known, lowRq = lowRq });
 			end
 		end
 	end
 
+	-- With an anchor, a target that offers a buyable variant IN your level window
+	-- (bandDist == 0) always sorts above one that does not - that is what makes
+	-- the list "gear at my level first" instead of "cheapest low-level ladder
+	-- first".  Within each tier the existing value/gold score (already scaled by
+	-- relevance, so nearer out-of-band targets edge out farther ones) decides.
 	table.sort (out, function (a, b)
+		if (anchor) then
+			local ain = (a.bandDist == 0);
+			local bin = (b.bandDist == 0);
+			if (ain ~= bin) then return ain; end
+		end
 		if (a.score ~= b.score) then return a.score > b.score; end
 		return a.id < b.id;
 		end);
@@ -3317,15 +3396,23 @@ local function Fdr_ResearchMoney (c)
 end
 
 
-function Fdr_Research_Report (limit)
+function Fdr_Research_Report (limit, levelOverride)
 
-	local db = Fdr_ResearchDB();
-	local t  = Fdr_Research_Targets (limit or 8);
+	limit = limit or 8;
+
+	local db     = Fdr_ResearchDB();
+	local anchor = Fdr_Research_Anchor (levelOverride);
+	local t      = Fdr_Research_Targets (limit, anchor);
 
 	local nitems = 0;
 	for _ in pairs (db.items) do nitems = nitems + 1; end
 
 	Fdr_ResearchMsg ("Finder research: "..nitems.." scaled items tracked across "..(db.scans or 0).." scans");
+
+	if (anchor) then
+		Fdr_ResearchMsg ("prioritising gear near level "..anchor
+						.." - use |cffffffff/atrtarget "..limit.." <level>|r to aim at another band");
+	end
 
 	if (#t == 0) then
 		Fdr_ResearchMsg ("no candidates yet - scan a cheap low-level gear category, then run /atrtarget again");
@@ -3349,9 +3436,14 @@ function Fdr_Research_Report (limit)
 			tinsert (parts, tag);
 		end
 
+		local relnote = "";
+		if (anchor and e.relevance and e.relevance < 1) then
+			relnote = string.format ("  |cff888888(level relevance x%.2f)|r", e.relevance);
+		end
+
 		Fdr_ResearchMsg (string.format ("%d. %s |cff888888(id %d)|r  score %.1f - %d unmapped of %d levels, %d confirmed rung%s, seen %dx over %d scans",
 						i, e.name, e.id, e.score, e.unmapped, e.variants,
-						e.rungs, (e.rungs == 1) and "" or "s", e.seen, e.scans));
+						e.rungs, (e.rungs == 1) and "" or "s", e.seen, e.scans) .. relnote);
 		Fdr_ResearchMsg ("     buy: "..table.concat (parts, "   ")
 						..((#want > 6) and ("   |cff888888(+"..(#want - 6).." more)|r") or ""));
 	end
@@ -3365,7 +3457,15 @@ end
 if (SlashCmdList) then
 	SLASH_ATRRESEARCHTARGET1 = "/atrtarget";
 	SlashCmdList["ATRRESEARCHTARGET"] = function (msg)
-		Fdr_Research_Report (tonumber (tostring (msg or ""):match ("%d+")) or 8);
+		-- "/atrtarget", "/atrtarget <n>", or "/atrtarget <n> <level>" - the
+		-- second number aims the shopping list at a level band other than the
+		-- character's own (the default anchor).
+		local n, lvl = tostring (msg or ""):match ("(%d+)%D+(%d+)");
+		if (n) then
+			Fdr_Research_Report (tonumber (n), tonumber (lvl));
+		else
+			Fdr_Research_Report (tonumber (tostring (msg or ""):match ("%d+")) or 8);
+		end
 	end
 end
 -- FINDER_TAB end: research targets
