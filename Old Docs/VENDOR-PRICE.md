@@ -53,9 +53,23 @@ so `m = cap^s`:
 delta   +1     +2     +4     +6     +8    +11    +14
 s      0.124  0.155  0.248  0.334  0.630  0.965  1.000
 
-delta -3 .. 0   ->  m = 1.00   (the base is a SHELF, and it extends downward)
-delta <= -4     ->  m = 0.42
+delta -3 .. +2  ->  m = 1.00   (the base is a SHELF, and it extends downward)
+
+delta   -4     -5     -6     -7     -8      (down shape, refit 2026-07; flat past -8)
+m      0.43   0.42   0.38   0.35   0.33
 ```
+
+**Down shape refit (2026-07).** The down region was a flat `m = 0.42`; with more
+confirmed down rungs it is now clearly a decline with depth, so the flat constant
+became the piecewise `ATR_VP_DOWN` table above (fit to the clean down cluster
+across seven items: Gloomshroud, Mantle of Thieves, Doomspike, Flintrock + the
+2167/2168/4661 ladders). Down-region backtest over the confirmed rungs
+(`delta <= -4`), old flat vs the slope: **all down rows n=26, median 13.7% ->
+2.9%; clean cluster n=19, 10.1% -> 0.9%.** The change is isolated to the
+`delta <= -4` branch of stage 4 — the shelf and up-region shape are byte-identical,
+so nothing above the down region can regress. The bimodal deep rows (a
+cache-polluted `bil` making true delta ~0, `m ~0.89-1.27`) remain unfittable by
+any down constant and are still the weakest output, exactly as before.
 
 Track cap, from the brq/class rules:
 

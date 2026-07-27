@@ -1090,17 +1090,43 @@ local ATR_VP_SHAPE = {
 	{  1, 0.124 }, {  2, 0.155 }, {  4, 0.248 }, {  6, 0.334 },
 	{  8, 0.630 }, { 11, 0.965 }, { 14, 1.000 },
 };
--- RETUNED from the 205-row live backtest (see VENDOR-PRICE-RESEARCH.md):
---   delta -3..+2  ->  m = 1.0    16 rows, median error 0.0% - the shelf extends
---                                DOWNWARD, so this band is not "unmapped" at all
---   delta <= -4   ->  m = 0.42    9 rows, median error 1.4%
--- Below about -7 the cached bil is too far from the effective base for either
--- constant to hold (the band is bimodal: ~0.35-0.41 for items whose cache is
--- near the template, ~0.89-1.27 for items whose cache sits well above it).
--- Estimates there are offered but are the weakest thing this function returns.
-local ATR_VP_DOWN_M		= 0.42;
+-- DOWN-SCALE SHAPE (refit 2026-07).  The flat x0.42 (retuned earlier from a
+-- 205-row backtest) is replaced: with more confirmed down rungs it is now clear
+-- the down region DECLINES with depth rather than sitting at one value.  Fitted
+-- to the clean down cluster across seven items (Gloomshroud, Mantle of Thieves,
+-- Doomspike, Flintrock + the 2167/2168/4661 ladders):
+--
+--   delta   -4     -5     -6     -7     -8
+--   m      0.43   0.42   0.38   0.35   0.33      (flat-extended past -8)
+--
+-- Down-region backtest over the confirmed rungs (delta <= -4), old flat vs this:
+--   ALL down rows   n=26   13.7% -> 2.9%  median error
+--   CLEAN cluster   n=19   10.1% -> 0.9%  median error
+-- The remaining rows are the documented bimodal case: below about -7 a
+-- cache-polluted bil puts the row's true delta near 0 (m ~0.89-1.27), so NO
+-- down constant fits them.  They stay the weakest thing this function returns,
+-- exactly as before - the refit helps the physically-down rows, not these.
+local ATR_VP_DOWN = {
+	{ -4, 0.43 }, { -5, 0.42 }, { -6, 0.38 }, { -7, 0.35 }, { -8, 0.33 },
+};
 local ATR_VP_SHELF		= 2;		-- upper edge: 4661 il26/27/28 all x1.0
 local ATR_VP_SHELF_LO	= -3;		-- lower edge: measured, not assumed
+
+-- piecewise-linear lookup on the down shape (knots DESCEND in delta),
+-- flat-extended past both ends
+local function Atr_VendorDown_M (delta)
+	if (delta >= ATR_VP_DOWN[1][1])            then return ATR_VP_DOWN[1][2]; end
+	if (delta <= ATR_VP_DOWN[#ATR_VP_DOWN][1]) then return ATR_VP_DOWN[#ATR_VP_DOWN][2]; end
+	local i;
+	for i = 1, #ATR_VP_DOWN - 1 do
+		local a, b = ATR_VP_DOWN[i], ATR_VP_DOWN[i+1];
+		if (delta <= a[1] and delta >= b[1]) then
+			local t = (delta - a[1]) / (b[1] - a[1]);
+			return a[2] + t * (b[2] - a[2]);
+		end
+	end
+	return 0.42;		-- unreachable; defensive
+end
 
 -- OBSERVED CAP FLOOR (self-healing track correction).
 -- The harvest-3 brq<=15 boundary picks the track, and the live backtest showed
@@ -1146,8 +1172,9 @@ function Atr_VendorShape_Estimate (bp, cap, delta)
 	end
 
 	if (delta < 0) then
-		return math.floor ((bp * ATR_VP_DOWN_M) + 0.5),
-			   string.format ("estimate: down-scale delta %d (x%.2f)", delta, ATR_VP_DOWN_M);
+		local dm = Atr_VendorDown_M (delta);
+		return math.floor ((bp * dm) + 0.5),
+			   string.format ("estimate: down-scale delta %d (x%.2f)", delta, dm);
 	end
 
 	local s;								-- interpolate the shared shape
