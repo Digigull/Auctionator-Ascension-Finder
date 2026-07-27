@@ -970,10 +970,14 @@ component is printed, so a bad ranking can be diagnosed instead of
 guessed at.  An item whose only remaining unmapped levels are bid-only
 drops off the list entirely - there is nothing to tell the user to buy.
 
-Output: **`/atrtarget [n] [level]`** prints the ranked shopping list in game
-(item, id, score, unmapped-of-total, existing rungs, and the exact
-required levels to buy with their cheapest seen price; `!` marks
-down-region levels).  The Finder's old dead **Debug** checkbox is
+Output: **`/atrtarget [n] [level]`** opens a **copy window** with the ranked
+shopping list (item, id, score, unmapped-of-total, existing rungs, and the
+exact required levels to buy with their cheapest seen price; `!` marks
+down-region levels).  The window is a plain, pre-selected multiline EditBox -
+press Ctrl+C immediately, or click **Copy to clipboard** (native
+`CopyToClipboard`, present on this client).  Chat gets a one-line receipt only;
+where there is no real UI (a headless client or the test harness) the full
+report falls back to chat line by line.  The Finder's old dead **Debug** checkbox is
 relabelled **Research** and now writes the ranked report alongside the
 raw scan rows into `AUCTIONATOR_FINDER_DEBUG`, making the stub addon the
 upload channel.  The ledger itself is always collected; the checkbox

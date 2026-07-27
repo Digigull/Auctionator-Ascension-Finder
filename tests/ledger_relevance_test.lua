@@ -108,4 +108,52 @@ local jChest = joined:find ("In%-Band Chest")
 assert (jLow < jChest, "override 20: low ladder should now print before in-band chest")
 print ("PASS 6  /atrtarget <n> <level> override retargets the band")
 
-print ("\nALL LEDGER RELEVANCE TESTS PASSED")
+-- 7) the copy window: with a REAL CreateFrame present, the report builds the
+--    popup, fills it with the plain-text report, and pre-selects it for Ctrl+C
+--    (falling back to chat only when there is no real UI, as in tests 1-6).
+--    Drop the permissive _G fallback first: it was needed only to LOAD the file;
+--    keeping it would make the cached-frame lookup (a nil global in the real
+--    client) resolve to the dummy and skip the build.
+setmetatable (_G, nil)
+local clip = { text = nil }
+local function newframe ()
+  local fr = { _scripts = {} }
+  function fr:SetText (s) self._text = s or "" end
+  function fr:GetText () return self._text or "" end
+  function fr:HighlightText () self._hl = true end
+  function fr:SetScript (k, f) self._scripts[k] = f end
+  function fr:CreateFontString () return newframe () end
+  function fr:SetScrollChild (c) self._child = c end
+  setmetatable (fr, { __index = function () return function () end end })
+  return fr
+end
+UIParent          = newframe ()
+ChatFontNormal    = {}
+UISpecialFrames   = {}
+function CopyToClipboard (s) clip.text = s end
+function CreateFrame (kind, name, parent, template)
+  local fr = newframe ()
+  if (name) then _G[name] = fr end
+  return fr
+end
+
+out_lines = {}
+Fdr_Research_Report (5, 52)
+local joined7 = table.concat (out_lines, "\n")
+assert (joined7:find ("opened the copy window"), "should print a chat receipt pointing at the window")
+local eb = _G["Atr_Finder_ResearchCopyEdit"]
+assert (eb, "the copy edit box should have been created")
+assert (eb._text and eb._text:find ("In%-Band Chest"), "edit box should hold the report text")
+assert (eb._text:find ("prioritising gear near level 52"), "report text should carry the band header")
+assert (eb._hl == true, "text should be pre-highlighted for Ctrl+C")
+assert (not eb._text:find ("|c"), "copy text must be plain (no colour codes)")
+print ("PASS 7  copy window builds, fills, and pre-highlights the report")
+
+-- 8) the native Copy-to-clipboard button copies the same text
+local cp = _G["$parentCopy"]
+assert (cp and cp._scripts.OnClick, "a Copy-to-clipboard button should exist when CopyToClipboard is present")
+cp._scripts.OnClick ()
+assert (clip.text == eb._text, "Copy button should push the report text to the clipboard")
+print ("PASS 8  Copy-to-clipboard button pushes the report to the clipboard")
+
+print ("\nALL LEDGER RELEVANCE + COPY-WINDOW TESTS PASSED")
