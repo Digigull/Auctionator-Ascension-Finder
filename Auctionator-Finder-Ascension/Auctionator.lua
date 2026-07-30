@@ -2410,11 +2410,40 @@ end
 
 -- Harvest whenever a profession window opens or refreshes.  A dedicated frame
 -- keeps this off the core event dispatcher.
+--
+-- TRADE_SKILL_UPDATE does NOT fire once per open: Blizzard's own UI refires it
+-- for every recipe whose item data is still streaming in from the server, so a
+-- single profession-window open produces a BURST of the event -- a full storm
+-- when the item cache is cold (e.g. right after a client repair wipes it).
+-- Re-harvesting the entire skill list on every one of those events froze the
+-- client on large Ascension professions.  So we DEBOUNCE: each event just arms
+-- a short timer, and the harvest runs ONCE, a beat after the updates go quiet.
+-- The produced-item IDs come straight from the recipe links, so one late pass
+-- reads exactly the same data the per-event passes would have, without the
+-- repeated work.
 if (type(CreateFrame) == "function") then
     local f = CreateFrame("Frame");
     f:RegisterEvent("TRADE_SKILL_SHOW");
     f:RegisterEvent("TRADE_SKILL_UPDATE");
-    f:SetScript("OnEvent", function() Atr_Craft_Harvest(); end);
+
+    local DELAY   = 0.5;     -- seconds of quiet before harvesting
+    local elapsed = 0;
+
+    f:Hide();                -- OnUpdate only ticks while shown; stay idle until armed
+
+    f:SetScript("OnEvent", function(self)
+        elapsed = 0;
+        self:Show();         -- (re)arm the timer; a fresh event pushes it back out
+    end);
+
+    f:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + (dt or 0);
+        if (elapsed >= DELAY) then
+            elapsed = 0;
+            self:Hide();     -- stop ticking before harvesting (idempotent, one-shot)
+            pcall(Atr_Craft_Harvest);   -- best-effort: a harvest error must never break the UI
+        end
+    end);
 end
 
 -----------------------------------------
