@@ -2981,18 +2981,117 @@ function Fdr_PriceDB_Report ()
 end
 
 
+-- Read-only inspector for a single item's stored price data.  Prints exactly
+-- what the two name-keyed databases hold for a name so a "tooltip looks wrong"
+-- report can be pinned to a cause:
+--   * auction (gAtr_ScanDB)        - the single lowest per-unit buyout kept by
+--                                    the last scan (no outlier rejection)
+--   * median samples (gAtr_MeanDB) - the up-to-15 sample array the median is
+--                                    taken from; a wide spread means the median
+--                                    is mixing several market eras
+--   * tooltip shows                - what Atr_GetAuctionPrice / Atr_GetMeanPrice
+--                                    actually render (may differ from the raw
+--                                    store via recent-sale / variant fallbacks)
+-- Touches nothing; accepts a typed name or a shift-clicked item link, and
+-- resolves case-insensitively to the real stored key.
+function Fdr_PriceDB_Inspect (query)
+
+	local function say (s)
+		if (zc and zc.msg_atr) then zc.msg_atr (s);
+		elseif (DEFAULT_CHAT_FRAME) then DEFAULT_CHAT_FRAME:AddMessage (s); end
+	end
+
+	if (type (gAtr_ScanDB) ~= "table") then
+		say ("  |cffff4040gAtr_ScanDB is not loaded|r - Auctionator's Atr_InitScanDB has not run.");
+		return;
+	end
+
+	query = tostring (query or "");
+	local bracket = query:match ("%[(.-)%]");			-- name inside a shift-clicked link
+	local name = bracket or query:gsub ("^%s+", ""):gsub ("%s+$", "");
+
+	if (name == "") then
+		say ("  usage: |cffffffff/atrprices <item name>|r  (or shift-click an item into chat)");
+		return;
+	end
+
+	-- Resolve to an actual stored key: exact first, then case-insensitive across
+	-- either database, so "fadeleaf" finds the "Fadeleaf" the DB is keyed under.
+	local haveExact = (gAtr_ScanDB[name] ~= nil)
+		or (type (gAtr_MeanDB) == "table" and type (gAtr_MeanDB[name]) == "table");
+	if (not haveExact) then
+		local lq = name:lower();
+		local k;
+		for k in pairs (gAtr_ScanDB) do
+			if (type (k) == "string" and k:lower() == lq) then name = k; haveExact = true; break; end
+		end
+		if (not haveExact and type (gAtr_MeanDB) == "table") then
+			for k in pairs (gAtr_MeanDB) do
+				if (type (k) == "string" and k:lower() == lq) then name = k; break; end
+			end
+		end
+	end
+
+	say (string.format ("Price DB inspect: |cffffd100%s|r", name));
+
+	local auc = gAtr_ScanDB[name];
+	say (string.format ("  auction (gAtr_ScanDB): %s",
+			auc and Fdr_MoneyString (auc) or "|cff888888(not stored)|r"));
+
+	local m = (type (gAtr_MeanDB) == "table") and gAtr_MeanDB[name] or nil;
+	if (type (m) == "table" and #m > 0) then
+		local n = #m;
+		local lo, hi = m[1], m[1];
+		local parts = {};
+		local i;
+		for i = 1, n do
+			if (m[i] < lo) then lo = m[i]; end
+			if (m[i] > hi) then hi = m[i]; end
+			parts[i] = Fdr_MoneyString (m[i]);
+		end
+		say (string.format ("  median samples (gAtr_MeanDB): |cffffffff%d|r/15", n));
+		say ("    "..table.concat (parts, "|cff555555,|r "));
+		say (string.format ("    low %s   high %s   spread |cffffffffx%.1f|r",
+				Fdr_MoneyString (lo), Fdr_MoneyString (hi),
+				(lo > 0) and (hi / lo) or 0));
+	else
+		say ("  median samples (gAtr_MeanDB): |cff888888(none)|r");
+	end
+
+	-- What the tooltip renders can differ from the raw store (recent-sale or
+	-- suffix-variant fallbacks in Atr_GetAuctionPrice), so show both.
+	local tipAuc = (Atr_GetAuctionPrice) and Atr_GetAuctionPrice (name) or nil;
+	local tipMed = (Atr_GetMeanPrice) and Atr_GetMeanPrice (name) or nil;
+	say (string.format ("  tooltip shows -> auction %s   median %s",
+			tipAuc and Fdr_MoneyString (tipAuc) or "|cff888888--|r",
+			tipMed and Fdr_MoneyString (tipMed) or "|cff888888--|r"));
+end
+
+
 -- The toggle itself lives in the options panel now, so the slash command
 -- doubles as the fallback for any build whose Scanning panel we cannot find:
--- /atrprices on|off.  No argument still just reports.
+-- /atrprices on|off.  No argument still just reports; any other argument (a
+-- typed name or a shift-clicked item link) inspects that one item's stored
+-- price data via Fdr_PriceDB_Inspect.
 if (SlashCmdList) then
 	SLASH_ATRPRICEFEED1 = "/atrprices";
 	SlashCmdList["ATRPRICEFEED"] = function (msg)
-		local arg = tostring (msg or ""):lower():match ("%a+");
-		if (arg == "on" or arg == "off") then
+		local raw = tostring (msg or "");
+		local firstword = raw:lower():match ("%a+");
+		if (firstword == "on" or firstword == "off") then
 			AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
-			AUCTIONATOR_FINDER_SETTINGS.feedPriceDB = (arg == "on");
+			AUCTIONATOR_FINDER_SETTINGS.feedPriceDB = (firstword == "on");
 			if (Fdr_Options_Sync) then Fdr_Options_Sync (); end
+			Fdr_PriceDB_Report ();
+			return;
 		end
+
+		-- Anything other than on/off/blank names an item to inspect.
+		if (raw:match ("%[(.-)%]") or raw:match ("%S")) then
+			Fdr_PriceDB_Inspect (raw);
+			return;
+		end
+
 		Fdr_PriceDB_Report ();
 	end
 end
