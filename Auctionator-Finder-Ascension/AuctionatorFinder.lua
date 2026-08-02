@@ -2976,8 +2976,44 @@ function Fdr_PriceDB_Report ()
 	say (string.format ("  quality floor: |cffffffff%d|r  (Auctionator options; rows below it are ignored)",
 					tonumber (AUCTIONATOR_SCAN_MINLEVEL or 0) or 0));
 	say ("  |cff888888scaled gear is excluded by design - the DB is name-keyed and cannot tell variants apart|r");
+	say ("  |cff888888/atrprices <item>|r inspect one item   |cff888888/atrprices reset <item>|r|cff888888 or |r|cff888888reset all|r recalibrate the median");
 
 	return names;
+end
+
+
+-- Resolve a typed name or a shift-clicked item link to the actual key the
+-- price databases are stored under: exact match first, then case-insensitive
+-- across either database, so "fadeleaf" finds the "Fadeleaf" the DB is keyed
+-- under.  Returns the cleaned input unchanged when nothing matches.
+function Fdr_PriceDB_ResolveName (query)
+
+	query = tostring (query or "");
+	local bracket = query:match ("%[(.-)%]");			-- name inside a shift-clicked link
+	local name = bracket or query:gsub ("^%s+", ""):gsub ("%s+$", "");
+	if (name == "") then return ""; end
+
+	local haveScan = (type (gAtr_ScanDB) == "table");
+	local haveMean = (type (gAtr_MeanDB) == "table");
+
+	if ((haveScan and gAtr_ScanDB[name] ~= nil)
+		or (haveMean and type (gAtr_MeanDB[name]) == "table")) then
+		return name;
+	end
+
+	local lq = name:lower();
+	local k;
+	if (haveScan) then
+		for k in pairs (gAtr_ScanDB) do
+			if (type (k) == "string" and k:lower() == lq) then return k; end
+		end
+	end
+	if (haveMean) then
+		for k in pairs (gAtr_MeanDB) do
+			if (type (k) == "string" and k:lower() == lq) then return k; end
+		end
+	end
+	return name;
 end
 
 
@@ -3006,30 +3042,11 @@ function Fdr_PriceDB_Inspect (query)
 		return;
 	end
 
-	query = tostring (query or "");
-	local bracket = query:match ("%[(.-)%]");			-- name inside a shift-clicked link
-	local name = bracket or query:gsub ("^%s+", ""):gsub ("%s+$", "");
+	local name = Fdr_PriceDB_ResolveName (query);
 
 	if (name == "") then
 		say ("  usage: |cffffffff/atrprices <item name>|r  (or shift-click an item into chat)");
 		return;
-	end
-
-	-- Resolve to an actual stored key: exact first, then case-insensitive across
-	-- either database, so "fadeleaf" finds the "Fadeleaf" the DB is keyed under.
-	local haveExact = (gAtr_ScanDB[name] ~= nil)
-		or (type (gAtr_MeanDB) == "table" and type (gAtr_MeanDB[name]) == "table");
-	if (not haveExact) then
-		local lq = name:lower();
-		local k;
-		for k in pairs (gAtr_ScanDB) do
-			if (type (k) == "string" and k:lower() == lq) then name = k; haveExact = true; break; end
-		end
-		if (not haveExact and type (gAtr_MeanDB) == "table") then
-			for k in pairs (gAtr_MeanDB) do
-				if (type (k) == "string" and k:lower() == lq) then name = k; break; end
-			end
-		end
 	end
 
 	say (string.format ("Price DB inspect: |cffffd100%s|r", name));
@@ -3068,16 +3085,84 @@ function Fdr_PriceDB_Inspect (query)
 end
 
 
+-- Correction: rebuild an item's median sample set from its current auction
+-- price.  A median built from old samples (e.g. a run of stale/lowball scans)
+-- otherwise takes several fresh scans to average back toward reality; this
+-- snaps it to today's price at once and lets the spread rebuild from there.
+-- "/atrprices reset all" recalibrates every priced item in one go.  Reseeding
+-- from gAtr_ScanDB keeps the median consistent with the auction line the
+-- moment it runs.
+function Fdr_PriceDB_Reset (query)
+
+	local function say (s)
+		if (zc and zc.msg_atr) then zc.msg_atr (s);
+		elseif (DEFAULT_CHAT_FRAME) then DEFAULT_CHAT_FRAME:AddMessage (s); end
+	end
+
+	if (type (gAtr_ScanDB) ~= "table") then
+		say ("  |cffff4040gAtr_ScanDB is not loaded|r - nothing to reseed from.");
+		return;
+	end
+	if (type (gAtr_MeanDB) ~= "table") then
+		say ("  |cffff4040gAtr_MeanDB is not loaded|r.");
+		return;
+	end
+
+	query = tostring (query or ""):gsub ("^%s+", ""):gsub ("%s+$", "");
+
+	-- Bulk: reseed every item that has a current auction price.
+	if (query:lower() == "all") then
+		local n = 0;
+		local name, price;
+		for name, price in pairs (gAtr_ScanDB) do
+			if (type (price) == "number" and price > 0) then
+				gAtr_MeanDB[name] = { price };
+				n = n + 1;
+			end
+		end
+		say (string.format ("Price DB reset: reseeded |cffffffff%d|r item%s to their current auction price.",
+				n, (n == 1) and "" or "s"));
+		say ("  medians now match the latest scan; spread rebuilds as you scan/search.");
+		return;
+	end
+
+	if (query == "") then
+		say ("  usage: |cffffffff/atrprices reset <item>|r  or  |cffffffff/atrprices reset all|r");
+		return;
+	end
+
+	local name = Fdr_PriceDB_ResolveName (query);
+	local price = gAtr_ScanDB[name];
+	if (type (price) ~= "number" or price <= 0) then
+		say (string.format ("Price DB reset: |cffffd100%s|r has no stored auction price to reseed from - search or scan it first.", name));
+		return;
+	end
+
+	local before = (Atr_GetMeanPrice) and Atr_GetMeanPrice (name) or nil;
+	gAtr_MeanDB[name] = { price };
+	say (string.format ("Price DB reset: |cffffd100%s|r  median %s -> %s  (reseeded from current auction)",
+			name,
+			before and Fdr_MoneyString (before) or "|cff888888--|r",
+			Fdr_MoneyString (price)));
+end
+
+
 -- The toggle itself lives in the options panel now, so the slash command
 -- doubles as the fallback for any build whose Scanning panel we cannot find:
--- /atrprices on|off.  No argument still just reports; any other argument (a
--- typed name or a shift-clicked item link) inspects that one item's stored
--- price data via Fdr_PriceDB_Inspect.
+-- /atrprices on|off.  Verbs:
+--   on|off            toggle the Finder price feed
+--   reset <item>|all  recalibrate an item's (or every item's) median to its
+--                     current auction price
+--   <item>            inspect one item's stored price data
+--   (no argument)     DB-wide report
+-- The leading verb is matched only when it is the first word, so an item that
+-- happens to contain one of these words still inspects correctly.
 if (SlashCmdList) then
 	SLASH_ATRPRICEFEED1 = "/atrprices";
 	SlashCmdList["ATRPRICEFEED"] = function (msg)
 		local raw = tostring (msg or "");
-		local firstword = raw:lower():match ("%a+");
+		local firstword = raw:lower():match ("^%s*(%a+)");
+
 		if (firstword == "on" or firstword == "off") then
 			AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
 			AUCTIONATOR_FINDER_SETTINGS.feedPriceDB = (firstword == "on");
@@ -3086,7 +3171,13 @@ if (SlashCmdList) then
 			return;
 		end
 
-		-- Anything other than on/off/blank names an item to inspect.
+		if (firstword == "reset") then
+			local rest = raw:gsub ("^%s*[Rr][Ee][Ss][Ee][Tt]%s*", "", 1);
+			Fdr_PriceDB_Reset (rest);
+			return;
+		end
+
+		-- Anything else names an item to inspect.
 		if (raw:match ("%[(.-)%]") or raw:match ("%S")) then
 			Fdr_PriceDB_Inspect (raw);
 			return;
