@@ -666,6 +666,22 @@ function AtrSearch:Finish()
 		if (newprice > 0) then
 			if (scn.itemQuality + 1 >= AUCTIONATOR_SCAN_MINLEVEL) then
 				gAtr_ScanDB[scn.itemName] = newprice;
+
+				-- Keep the median sample set in step with the auction price.  A
+				-- targeted search used to write gAtr_ScanDB alone, so its auction
+				-- number drifted away from a median built only from full scans --
+				-- the two tooltip lines were drawn from different populations, and
+				-- names touched only here got an auction price but no samples at
+				-- all.  Append the same value here too, matching the full-scan /
+				-- Finder / Bazaar feeds: cap at 15, evict at random when full,
+				-- keep sorted for Atr_GetMeanPrice.
+				if (type (gAtr_MeanDB) == "table") then
+					local m = gAtr_MeanDB[scn.itemName];
+					if (type (m) ~= "table") then m = {}; gAtr_MeanDB[scn.itemName] = m; end
+					if (#m >= 15) then tremove (m, math.random (1, #m)); end
+					tinsert (m, newprice);
+					table.sort (m);
+				end
 			end
 		end
 	end
