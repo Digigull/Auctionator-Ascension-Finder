@@ -1808,15 +1808,29 @@ function Atr_TipBestPrice (...)
 	return best;
 end
 
--- Wraps a label in green when its own line holds the best price.  ONLY the
--- label is wrapped: xstring carries its own |c...|r for the stack multiplier,
--- and a |r returns to the FontString's own colour rather than to an enclosing
--- |c, so wrapping both would leave the suffix uncoloured and a stray |r
--- behind.  best == nil (nothing to compare) returns the label untouched.
+-- FINDER_TAB: the colour code (|cFFrrggbb form) for the best-price highlight.
+-- Configurable in the Tooltips options panel and stored as a hex "RRGGBB"
+-- string; falls back to the default blue when unset or malformed so a bad
+-- saved value can never break a tooltip.
+function Atr_TipsHighlightCode ()
+
+	local hex = AUCTIONATOR_TIPS_HL_COLOR;
+	if (type (hex) == "string" and hex:match ("^%x%x%x%x%x%x$")) then
+		return "|cFF"..hex;
+	end
+
+	return "|cFF3399FF";		-- default blue
+end
+
+-- Wraps a label in the highlight colour when its own line holds the best price.
+-- ONLY the label is wrapped: xstring carries its own |c...|r for the stack
+-- multiplier, and a |r returns to the FontString's own colour rather than to an
+-- enclosing |c, so wrapping both would leave the suffix uncoloured and a stray
+-- |r behind.  best == nil (nothing to compare) returns the label untouched.
 function Atr_TipLabel (text, price, best)
 
 	if (best and price and price == best) then
-		return "|cFF00FF00"..text.."|r";
+		return Atr_TipsHighlightCode()..text.."|r";
 	end
 
 	return text;
@@ -1974,9 +1988,18 @@ local function ShowTipWithPricing (tip, link, num)
 
 	local xstring = "";
 	local showStackPrices = IsShiftKeyDown();
-	
+
 	if (AUCTIONATOR_SHIFT_TIPS == 2) then
 		showStackPrices = not IsShiftKeyDown();
+	end
+
+	-- FINDER_TAB: unless ALT is held, every addon price line EXCEPT the Vendor
+	-- line (learned / predicted / estimated tiers all count as Vendor) stays
+	-- hidden, keeping the tooltip clean at a glance.  Governed by
+	-- AUCTIONATOR_TIPS_ALT (1 = hide until ALT, 0 = always show).
+	local revealExtra = true;
+	if (AUCTIONATOR_TIPS_ALT == 1 and not IsAltKeyDown()) then
+		revealExtra = false;
 	end
 
 	if (num and showStackPrices) then
@@ -2015,7 +2038,26 @@ local function ShowTipWithPricing (tip, link, num)
 	if (AUCTIONATOR_A_TIPS == 1)                               then medianShown  = auctionMedianPrice; end
 	if (AUCTIONATOR_D_TIPS == 1)                               then deShown      = dePrice;            end
 
+	-- FINDER_TAB: when the extra lines are hidden they must not count towards
+	-- the highlight either -- with only the Vendor line visible there is
+	-- nothing to compare, so nothing should be painted.  Clearing the shown
+	-- values here keeps Atr_TipBestPrice's "fewer than two competitors" rule
+	-- honest about what is actually on screen.
+	if (not revealExtra) then
+		auctionShown = nil; medianShown = nil; deShown = nil;
+	end
+
 	local bestPrice = Atr_TipBestPrice (vendorShown, auctionShown, medianShown, deShown);
+
+	-- FINDER_TAB: Auction and Auction median agreeing is the common case, and
+	-- highlighting both reads as noise.  When they tie for best the Auction line
+	-- keeps the highlight (it is the figure to act on) and the median yields --
+	-- so medianBest only holds the best price when the median STRICTLY beats the
+	-- auction line, i.e. it is the sole top figure.
+	local medianBest = bestPrice;
+	if (medianShown and auctionShown and medianShown == auctionShown) then
+		medianBest = nil;
+	end
 
 	-- vendor info
 
@@ -2036,7 +2078,7 @@ local function ShowTipWithPricing (tip, link, num)
 	
 	-- auction info
 
-	if (AUCTIONATOR_A_TIPS == 1) then
+	if (revealExtra and AUCTIONATOR_A_TIPS == 1) then
 
 		-- FINDER_TAB: bonding is resolved with the candidates above (same call,
 		-- same gate) so the highlight and this branch agree by construction
@@ -2061,13 +2103,13 @@ local function ShowTipWithPricing (tip, link, num)
 			tip:AddDoubleLine (ZT("Auction")..xstring, "|cFFFFFFFF"..ZT("unknown").."  ");
 		end
         if (auctionMedianPrice ~= nil) then
-            tip:AddDoubleLine (Atr_TipLabel (ZT("Auction median"), medianShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (auctionMedianPrice));
+            tip:AddDoubleLine (Atr_TipLabel (ZT("Auction median"), medianShown, medianBest)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (auctionMedianPrice));
         end
 	end
-	
+
 	-- disenchanting info
 
-	if (AUCTIONATOR_D_TIPS == 1 and dePrice ~= nil) then
+	if (revealExtra and AUCTIONATOR_D_TIPS == 1 and dePrice ~= nil) then
 		if (dePrice > 0) then
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Disenchant"), deShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString(dePrice));
 		else
@@ -2083,7 +2125,7 @@ local function ShowTipWithPricing (tip, link, num)
 	if (AUCTIONATOR_DE_DETAILS_TIPS == 4) then showDetails = false; end;
 	if (AUCTIONATOR_DE_DETAILS_TIPS == 5) then showDetails = true; end;
 	
-	if (showDetails and dePrice ~= nil) then
+	if (revealExtra and showDetails and dePrice ~= nil) then
 		Atr_AddDEDetailsToTip (tip, itemType, itemRarity, itemLevel, Atr_DEReqLevel(itemID));
 	end
 
@@ -2097,7 +2139,16 @@ local function ShowTipWithPricing (tip, link, num)
 	-- finished craft would fetch.  Gated on Auction tips being on, since the
 	-- comparison needs the auction price; only appears for craftable items
 	-- whose reagents we can fully price, so normal tooltips stay untouched.
-	Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xstring);
+	if (revealExtra) then
+		Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xstring);
+	end
+
+	-- FINDER_TAB: while the extra lines are hidden behind ALT, leave a faint
+	-- one-line breadcrumb so the prices are discoverable.  Only shown when there
+	-- is actually something to reveal (Auction or Disenchant tips enabled).
+	if (not revealExtra and (AUCTIONATOR_A_TIPS == 1 or AUCTIONATOR_D_TIPS == 1)) then
+		tip:AddLine ("|cFF808080"..ZT("Hold <Alt> for auction prices").."|r");
+	end
 
 	tip:Show()
 

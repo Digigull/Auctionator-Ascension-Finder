@@ -64,6 +64,15 @@ UI that trusts the AH API's level values.
   price is estimated as the **median across the suffixed variants** that are,
   shown on tooltips as `~price (est) (n)`. This feeds the Sell tab and the
   crafting help above, so base gear is priced instead of blank.
+- **Configurable tooltip prices** — by default every addon price line except
+  **Vendor** (its predicted / estimated tiers included) is hidden until you
+  hold **Alt**, keeping tooltips clean at a glance; a faint "Hold &lt;Alt&gt;
+  for auction prices" breadcrumb marks what's tucked away. The best (lowest)
+  price line is highlighted in a configurable colour — **blue** by default —
+  and when Auction and Auction median tie, only the **Auction** line is
+  highlighted. All of this lives under *Interface → Options → AddOns →
+  Auctionator → Tooltips*: which lines show, whether they need Alt, and the
+  highlight colour (a standard colour-picker swatch).
 
 For the full design, see the notes in [`Old Docs/`](Old%20Docs/) —
 especially [`FINDER-ARCHITECTURE.md`](Old%20Docs/FINDER-ARCHITECTURE.md),
