@@ -196,35 +196,63 @@ local function ClassifyOpenBank ()
 	return nil, n;		-- real guild bank / unknown -> left alone
 end
 
+-- Read a single tab into a { [itemID]=count } map.  Returns the map and whether
+-- ANY item was seen -- an all-empty read means the tab either is genuinely empty
+-- OR (on a fresh bank open) has not streamed in from the server yet, and the two
+-- are indistinguishable through this API.
+local function ScanGuildTab (t)
+	local slots = MAX_GUILDBANK_SLOTS_PER_TAB or 98;		-- stock tab is 14x7
+	local tc, any = {}, false;
+	for s = 1, slots do
+		local link = GetGuildBankItemLink (t, s);
+		if (link) then
+			local id = zc and zc.ItemIDfromLink (link);
+			id = tonumber (id);
+			if (id) then
+				local _, cnt = GetGuildBankItemInfo (t, s);
+				tc[id] = (tc[id] or 0) + (tonumber (cnt) or 1);
+				any = true;
+			end
+		end
+	end
+	return tc, any;
+end
+
 function Atr_ItemCount_ScanWebBank ()
 	if (not gGuildBankOpen) then return; end
 
 	local bankType, n = ClassifyOpenBank ();
 	if (not bankType) then return; end
 
-	local slots  = MAX_GUILDBANK_SLOTS_PER_TAB or 98;		-- stock tab is 14x7
-	local totals = {};
-	local tabs   = {};
+	-- MERGE into the existing record rather than replacing it.  When a bank first
+	-- opens, only the tab in view has streamed in; the others read empty until
+	-- clicked.  A full replace would wipe the counts we already cached for those
+	-- tabs (the item vanishes from the tooltip, then returns when you open its
+	-- tab).  So we refresh only tabs that actually have content this pass and keep
+	-- the previously-cached contents of tabs that read empty (not yet loaded).
+	local existing;
+	if (bankType == "personal") then existing = EnsureChar ().personal;
+	else                             existing = EnsureWebBanks ().realm; end
+	local tabs = (existing and type (existing.tabs) == "table") and existing.tabs or {};
 
 	for t = 1, n do
-		local tc = {};
-		for s = 1, slots do
-			local link = GetGuildBankItemLink (t, s);
-			if (link) then
-				local id = zc and zc.ItemIDfromLink (link);
-				id = tonumber (id);
-				if (id) then
-					local _, cnt = GetGuildBankItemInfo (t, s);
-					cnt = tonumber (cnt) or 1;
-					tc[id]     = (tc[id]     or 0) + cnt;
-					totals[id] = (totals[id] or 0) + cnt;
-				end
-			end
-		end
-		tabs[t] = tc;
+		local tc, any = ScanGuildTab (t);
+		if (any) then
+			tabs[t] = tc;					-- a loaded tab -> refresh it
+		elseif (tabs[t] == nil) then
+			tabs[t] = {};					-- first sight, empty/unloaded -> placeholder
+		end									-- else: keep the prior (unloaded this pass)
 	end
 
-	local rec = { updated = time (), ntabs = n, totals = totals, tabs = tabs };
+	-- Recompute the totals from the merged per-tab maps.
+	local totals = {};
+	for _, tc in pairs (tabs) do
+		for id, c in pairs (tc) do totals[id] = (totals[id] or 0) + c; end
+	end
+
+	local ntabs = n;
+	if (existing and (existing.ntabs or 0) > ntabs) then ntabs = existing.ntabs; end
+	local rec = { updated = time (), ntabs = ntabs, totals = totals, tabs = tabs };
 	if (bankType == "personal") then
 		-- Each character has their OWN personal bank, so it belongs to whoever is
 		-- looking at it -- stored on the character entry, like their bags/bank.

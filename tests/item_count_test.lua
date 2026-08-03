@@ -158,6 +158,21 @@ ok (ch.personal ~= nil and ch.personal.totals[500] == 9, "a personal-bank window
 ok (w.personal == nil,             "the personal bank is NOT stored in the shared realm vault")
 ok (w.realm.totals[300] == 10,     "opening the personal bank did not clobber the realm cache")
 
+-- A fresh open where a tab has not streamed in yet (reads empty) must NOT wipe
+-- that tab's previously-cached contents -- the reported bug where the count
+-- vanished on open and came back on clicking the tab.  Tab 2 (holding item 500)
+-- now reads empty; tab 1 is still loaded.
+gbank.tabNames = { "Personal Bank", "Personal Bank" }
+gbank.tabs = { [1] = { { id = 300, count = 1 } }, [2] = {} }
+drive ("GUILDBANKFRAME_OPENED")
+ok (ch.personal.totals[500] == 9, "an unloaded tab keeps its cached count (no wipe on open)")
+ok (ch.personal.totals[300] == 1, "the loaded tab still refreshes normally")
+
+-- When that tab finally streams in, its real contents refresh the cache.
+gbank.tabs = { [1] = { { id = 300, count = 1 } }, [2] = { { id = 500, count = 12 } } }
+drive ("GUILDBANKBAGSLOTS_CHANGED")
+ok (ch.personal.totals[500] == 12, "once the tab loads, its count refreshes to the live value")
+
 -- The genuine guild bank reports zero tabs and must be ignored.
 gbank.tabNames = {}
 gbank.tabs = {}
