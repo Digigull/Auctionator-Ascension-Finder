@@ -138,51 +138,57 @@ gbank.tabs = {
 drive ("GUILDBANKFRAME_OPENED")
 
 local w = AUCTIONATOR_ITEM_LOCATIONS.webbanks["Realm"]
-ok (w and w.realm ~= nil,          "a realm-bank window is cached under webbanks[realm].realm")
-ok (w.personal == nil,             "it is NOT recorded as a personal bank (tab 1 name wins)")
+ok (w and w.realm ~= nil,          "a realm-bank window is cached (shared) under webbanks[realm].realm")
+ok (w.personal == nil,             "the realm bank is not a personal bank (tab 1 name wins)")
 ok (w.realm.totals[300] == 10,     "item counts are summed across the window's tabs (4 + 6)")
 ok (w.realm.ntabs == 3,            "the tab count is recorded")
 
 local qt, _, wl = Atr_ItemCount_Query (300)
-ok (qt == 10,                      "Query totals the web-bank holding")
+ok (qt == 10,                      "Query totals the realm-bank holding")
 ok (#wl == 1 and wl[1].kind == "realm", "the holding is attributed to the realm bank")
 ok (wl[1].tabs[1] == 1 and wl[1].tabs[2] == 3, "the tabs holding it are listed (1 and 3, not empty 2)")
 
--- A personal-bank window (only "Personal Bank" tabs) buckets as 'personal', and
--- leaves the realm-bank cache untouched.
+-- A personal-bank window (only "Personal Bank" tabs) belongs to the CURRENT
+-- character -- stored on the character entry, not the shared realm vault.
 gbank.tabNames = { "Personal Bank", "Personal Bank" }
 gbank.tabs = { [1] = { { id = 300, count = 1 } }, [2] = { { id = 500, count = 9 } } }
 drive ("GUILDBANKFRAME_OPENED")
-ok (w.personal ~= nil and w.personal.totals[500] == 9, "a personal-bank window caches under .personal")
+local ch = AUCTIONATOR_ITEM_LOCATIONS.chars["Realm-CharA"]
+ok (ch.personal ~= nil and ch.personal.totals[500] == 9, "a personal-bank window caches on the character")
+ok (w.personal == nil,             "the personal bank is NOT stored in the shared realm vault")
 ok (w.realm.totals[300] == 10,     "opening the personal bank did not clobber the realm cache")
 
 -- The genuine guild bank reports zero tabs and must be ignored.
 gbank.tabNames = {}
 gbank.tabs = {}
-local beforePersonal = w.personal.totals[500]
+local beforePersonal = ch.personal.totals[500]
 drive ("GUILDBANKFRAME_OPENED")
-ok (w.personal.totals[500] == beforePersonal, "a 0-tab (real guild) bank leaves the cache untouched")
+ok (ch.personal.totals[500] == beforePersonal, "a 0-tab (real guild) bank leaves the cache untouched")
+
+-- Legacy shared-personal data from the earlier build is dropped on load.
+AUCTIONATOR_ITEM_LOCATIONS.webbanks["Realm"].personal = { ntabs = 1, totals = { [123] = 5 }, tabs = {} }
+Atr_ItemCount_Query (1)   -- forces EnsureDB migration
+ok (AUCTIONATOR_ITEM_LOCATIONS.webbanks["Realm"].personal == nil, "legacy shared personal-bank data is migrated out")
 
 -- ---- Query across characters AND web banks together ----
 
 AUCTIONATOR_ITEM_LOCATIONS = {
   chars = {
-    ["Realm-CharA"] = { name = "CharA", realm = "Realm", bags = { [100] = 20 }, bank = { [100] = 10 } },
-    ["Realm-CharB"] = { name = "CharB", realm = "Realm", bags = { [100] = 5  }, bank = {}            },
+    ["Realm-CharA"] = { name = "CharA", realm = "Realm", bags = { [100] = 20 }, bank = { [100] = 10 },
+                        personal = { ntabs = 1, totals = { [100] = 8 }, tabs = { [1] = { [100] = 8 } } } },
+    ["Realm-CharB"] = { name = "CharB", realm = "Realm", bags = { [100] = 5  }, bank = {} },
   },
   webbanks = {
-    ["Realm"] = {
-      personal = { ntabs = 1, totals = { [100] = 8 }, tabs = { [1] = { [100] = 8 } } },
-      realm    = { ntabs = 1, totals = { [100] = 2 }, tabs = { [1] = { [100] = 2 } } },
-    },
+    ["Realm"] = { realm = { ntabs = 1, totals = { [100] = 2 }, tabs = { [1] = { [100] = 2 } } } },
   },
 }
 local total, list, web = Atr_ItemCount_Query (100)
-ok (total == 45,             "Query sums characters (20+10+5) and web banks (8+2)")
+ok (total == 45,             "Query sums bags/bank/personal (20+10+8+5) and the realm bank (2)")
 ok (#list == 2,              "both holding characters are listed")
 ok (list[1].name == "CharA", "the current character sorts first")
-ok (#web == 2,               "both web banks that hold the item are listed")
-ok (web[1].kind == "personal" and web[2].kind == "realm", "web banks list personal before realm")
+ok (list[1].personal == 8,   "the current character's personal-bank count is attributed to them")
+ok (list[2].personal == 0,   "a character with no personal bank shows zero, not another's count")
+ok (#web == 1 and web[1].kind == "realm", "only the shared realm bank appears as a web line")
 ok (Atr_ItemCount_Query (777) == 0, "an item held nowhere totals zero")
 
 -- ---- Atr_ItemCount_AddToTip: the rendered lines ----
@@ -199,16 +205,17 @@ ok (stripColor (tip.lines[1].l) == "Qty",         "the first line is labelled Qt
 ok (stripColor (tip.lines[1].r) == "45",          "the Qty line shows the grand total")
 ok (stripColor (tip.lines[2].l):find ("ALT"),     "the breadcrumb names the ALT modifier")
 
--- ALT down: Qty + 2 character lines + 2 web-bank lines.
+-- ALT down: Qty + 2 character lines + 1 shared realm-bank line.
 mod.alt = true
 tip = newTip ()
 Atr_ItemCount_AddToTip (tip, 100)
-ok (#tip.lines == 5,                              "ALT down -> Qty + per-character + per-web-bank lines")
+ok (#tip.lines == 4,                              "ALT down -> Qty + 2 character lines + 1 realm-bank line")
 ok (stripColor (tip.lines[2].l):find ("CharA"),   "the first location line is the current character")
-ok (stripColor (tip.lines[2].r) == "20 bags, 10 bank", "bags and bank are both itemised")
-ok (stripColor (tip.lines[4].l):find ("Personal Bank"), "a Personal Bank line appears")
-ok (stripColor (tip.lines[4].r) == "8",           "the Personal Bank line shows its count")
-ok (stripColor (tip.lines[5].l):find ("Realm Bank"),    "a Realm Bank line appears")
+ok (stripColor (tip.lines[2].r):find ("20 bags, 10 bank, 8 Personal Bank %(tab 1%)"),
+                                                  "the current character's line itemises bags, bank AND their personal bank (with tab)")
+ok (not stripColor (tip.lines[3].r):find ("Personal"), "the other character's line has no personal bank")
+ok (stripColor (tip.lines[4].l):find ("Realm Bank"),   "the shared Realm Bank appears as its own line")
+ok (stripColor (tip.lines[4].r) == "2",           "the Realm Bank line shows its count")
 
 -- Quantity mode 'never' stays silent.
 AUCTIONATOR_QTY_TIPS = 4

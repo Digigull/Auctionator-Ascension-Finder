@@ -17,12 +17,12 @@
 --               name=, realm=, class=, faction=, updated=,
 --               bags = { [itemID]=count },   -- backpack (bags 0..NUM_BAG_SLOTS)
 --               bank = { [itemID]=count },   -- character bank (-1 + bank bags)
+--               personal = { ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },  -- THIS char's personal bank
 --           },
 --       },
---       webbanks = {                          -- shared, keyed by realm
+--       webbanks = {                          -- shared vaults, keyed by realm
 --           ["Realm"] = {
---               personal = { updated=, ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },
---               realm    = { updated=, ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },
+--               realm = { updated=, ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },  -- one realm bank for all chars
 --           },
 --       },
 --   }
@@ -31,10 +31,12 @@
 -- guild-bank API (GetGuildBankItemInfo etc.), and when either is open EVERY tab
 -- is readable at once -- no per-tab query needed.  They are told apart by tab 1's
 -- name: a "Realm Bank" tab present => the realm bank, otherwise the personal
--- bank (tabs 2+ carry unreliable names, so only tab 1 is trusted).  The genuine
--- GUILD bank reports zero tabs through this API and is a separate, opt-in
--- follow-up -- see Atr_ItemCount_ProbeGuildBank, the diagnostic used to map all
--- of the above.
+-- bank (tabs 2+ carry unreliable names, so only tab 1 is trusted).  The PERSONAL
+-- bank is per character (stored on the character entry, like bags/bank); the
+-- REALM bank is one vault shared by every character on the realm (stored once).
+-- The genuine GUILD bank reports zero tabs through this API and is a separate,
+-- opt-in follow-up -- see Atr_ItemCount_ProbeGuildBank, the diagnostic used to
+-- map all of the above.
 
 local addonName, addonTable = ...;
 local zc = addonTable and addonTable.zc or _G.zc;
@@ -83,6 +85,15 @@ local function EnsureDB ()
 	end
 
 	if (type (db.webbanks) ~= "table") then db.webbanks = {}; end
+
+	-- An earlier build stored the personal bank as a single shared vault per
+	-- realm.  Each character actually has their OWN personal bank, so that data
+	-- can't be attributed to a character -- drop it; it re-caches per character
+	-- the next time each opens their personal bank.  The realm bank stays.
+	for _, w in pairs (db.webbanks) do
+		if (type (w) == "table") then w.personal = nil; end
+	end
+
 	return db;
 end
 
@@ -213,17 +224,38 @@ function Atr_ItemCount_ScanWebBank ()
 		tabs[t] = tc;
 	end
 
-	local w = EnsureWebBanks ();
-	w[bankType] = { updated = time (), ntabs = n, totals = totals, tabs = tabs };
+	local rec = { updated = time (), ntabs = n, totals = totals, tabs = tabs };
+	if (bankType == "personal") then
+		-- Each character has their OWN personal bank, so it belongs to whoever is
+		-- looking at it -- stored on the character entry, like their bags/bank.
+		EnsureChar ().personal = rec;
+	else
+		-- The realm bank is a single vault shared by all the account's characters
+		-- on this realm, so it is stored once, per realm.
+		EnsureWebBanks ().realm = rec;
+	end
 end
 
 -----------------------------------------
 -- Query + rendering
 
+-- The tab indices of a web-bank record that hold the item, e.g. {1, 3}.
+local function TabHits (rec, itemID)
+	local hits = {};
+	if (rec and type (rec.tabs) == "table") then
+		for t = 1, (rec.ntabs or 0) do
+			local tc = rec.tabs[t];
+			if (tc and tc[itemID] and tc[itemID] > 0) then hits[#hits+1] = t; end
+		end
+	end
+	return hits;
+end
+
 -- Total the item everywhere it is cached.  Returns:
---   total     grand total across characters and this realm's web-shop banks
---   charList  { {name,realm,class,bags,bank,isCurrent}, ... } current-char first
---   webList   { {kind="personal"/"realm", label, count, tabs={idx,...}}, ... }
+--   total     grand total across characters (bags/bank/personal) + the realm bank
+--   charList  { {name,class,bags,bank,personal,personalTabs,isCurrent}, ... }
+--             current-character first -- personal bank is per character
+--   webList   { {kind="realm", label, count, tabs={idx,...}} }  -- shared banks
 function Atr_ItemCount_Query (itemID)
 	itemID = tonumber (itemID);
 	if (not itemID) then return 0, {}, {}; end
@@ -237,11 +269,15 @@ function Atr_ItemCount_Query (itemID)
 		if (type (e) == "table") then
 			local b = (type (e.bags) == "table" and e.bags[itemID]) or 0;
 			local k = (type (e.bank) == "table" and e.bank[itemID]) or 0;
-			if (b + k > 0) then
-				total = total + b + k;
+			local p = (type (e.personal) == "table" and type (e.personal.totals) == "table"
+			           and e.personal.totals[itemID]) or 0;
+			if (b + k + p > 0) then
+				total = total + b + k + p;
 				charList[#charList+1] = {
 					name = e.name or key, realm = e.realm, class = e.class,
-					bags = b, bank = k, isCurrent = (key == curKey),
+					bags = b, bank = k, personal = p,
+					personalTabs = (p > 0) and TabHits (e.personal, itemID) or {},
+					isCurrent = (key == curKey),
 				};
 			end
 		end
@@ -249,32 +285,20 @@ function Atr_ItemCount_Query (itemID)
 
 	table.sort (charList, function (a, c)
 		if (a.isCurrent ~= c.isCurrent) then return a.isCurrent; end
-		local at, ct = a.bags + a.bank, c.bags + c.bank;
+		local at = a.bags + a.bank + a.personal;
+		local ct = c.bags + c.bank + c.personal;
 		if (at ~= ct) then return at > ct; end
 		return (a.name or "") < (c.name or "");
 	end);
 
-	-- This realm's web-shop banks, personal before realm.
+	-- The shared realm bank for this realm.
 	local realm = GetRealmName () or "";
 	local w = db.webbanks[realm];
-	if (type (w) == "table") then
-		local order = { { "personal", ZT ("Personal Bank") }, { "realm", ZT ("Realm Bank") } };
-		for _, od in ipairs (order) do
-			local kind, label = od[1], od[2];
-			local bank = w[kind];
-			local n = bank and type (bank.totals) == "table" and bank.totals[itemID];
-			if (n and n > 0) then
-				total = total + n;
-				local hits = {};
-				if (type (bank.tabs) == "table") then
-					for t = 1, (bank.ntabs or 0) do
-						local tc = bank.tabs[t];
-						if (tc and tc[itemID] and tc[itemID] > 0) then hits[#hits+1] = t; end
-					end
-				end
-				webList[#webList+1] = { kind = kind, label = label, count = n, tabs = hits };
-			end
-		end
+	local rb = (type (w) == "table") and w.realm or nil;
+	local n = rb and type (rb.totals) == "table" and rb.totals[itemID];
+	if (n and n > 0) then
+		total = total + n;
+		webList[#webList+1] = { kind = "realm", label = ZT ("Realm Bank"), count = n, tabs = TabHits (rb, itemID) };
 	end
 
 	return total, charList, webList;
@@ -304,12 +328,22 @@ function Atr_ItemCount_AddToTip (tip, itemID)
 
 	local locMode = AUCTIONATOR_QTY_LOC_TIPS or 3;
 	if (ModeVisible (locMode)) then
+		-- Per character: bags, bank, and THIS character's own personal bank.
 		for _, c in ipairs (charList) do
 			local parts = {};
 			if (c.bags and c.bags > 0) then parts[#parts+1] = c.bags.." "..ZT ("bags"); end
 			if (c.bank and c.bank > 0) then parts[#parts+1] = c.bank.." "..ZT ("bank"); end
+			if (c.personal and c.personal > 0) then
+				local seg = c.personal.." "..ZT ("Personal Bank");
+				if (#c.personalTabs > 0) then
+					seg = seg.." |cFF888888("..ZT ("tab")..(#c.personalTabs > 1 and "s" or "").." "
+					      ..table.concat (c.personalTabs, ", ")..")|r";
+				end
+				parts[#parts+1] = seg;
+			end
 			tip:AddDoubleLine ("  "..ColorName (c), "|cFFCCCCCC"..table.concat (parts, ", ").."|r");
 		end
+		-- Shared banks (the realm bank), not tied to any one character.
 		for _, b in ipairs (webList) do
 			local label = "  |cFFFFD100"..b.label.."|r";
 			if (#b.tabs > 0) then
@@ -360,16 +394,17 @@ function Atr_ItemCount_Dump ()
 	local nChars = 0;
 	for key, e in pairs (db.chars) do
 		nChars = nChars + 1;
-		local nb, nk = 0, 0;
+		local nb, nk, np = 0, 0, 0;
 		for _ in pairs (e.bags or {}) do nb = nb + 1; end
 		for _ in pairs (e.bank or {}) do nk = nk + 1; end
-		p (string.format ("%s: %d bag-stacks, %d bank-stacks", key, nb, nk));
+		if (type (e.personal) == "table") then for _ in pairs (e.personal.totals or {}) do np = np + 1; end end
+		p (string.format ("%s: %d bag-stacks, %d bank-stacks, %d personal-bank-stacks", key, nb, nk, np));
 	end
 	for realm, w in pairs (db.webbanks) do
-		for kind, bank in pairs (w) do
+		if (type (w.realm) == "table") then
 			local ni = 0;
-			for _ in pairs (bank.totals or {}) do ni = ni + 1; end
-			p (string.format ("webbank %s/%s: %d items across %d tabs", realm, kind, ni, bank.ntabs or 0));
+			for _ in pairs (w.realm.totals or {}) do ni = ni + 1; end
+			p (string.format ("realm bank %s: %d items across %d tabs", realm, ni, w.realm.ntabs or 0));
 		end
 	end
 	p ("cached characters: "..nChars.."   bankOpen="..tostring (gBankOpen)

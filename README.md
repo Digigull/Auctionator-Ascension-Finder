@@ -76,11 +76,13 @@ UI that trusts the AH API's level values.
 
 - **Item quantity on tooltips** — item tooltips gain a **Qty** line totalling how
   many you own across all your characters; hold **Alt** and it expands into a
-  breakdown of where they sit: per character (bags vs. bank) and in the
-  account-wide web-shop **Personal Bank** / **Realm Bank** (with the tab numbers
-  that hold it). Counts are remembered as each character's bags update, its bank
-  is opened, and each web-shop bank is opened, so the total is right even away
-  from a bank. Both the quantity line and the location breakdown are
+  breakdown of where they sit: per character (bags, bank, and that character's
+  own web-shop **Personal Bank**) plus the shared **Realm Bank** — with the tab
+  numbers that hold it. Each character has their own Personal Bank so it's
+  attributed to them, while the Realm Bank is one vault shared across all your
+  characters. Counts are remembered as each character's bags update, its bank is
+  opened, and each web-shop bank is opened, so the total is right even away from
+  a bank. Both the quantity line and the location breakdown are
   independently configurable (always / never / Shift / Ctrl / Alt) under
   *Tooltips*; quantity defaults to **always** and locations to **hold Alt**. The
   Personal and Realm banks are told apart by their first tab's name — the way
