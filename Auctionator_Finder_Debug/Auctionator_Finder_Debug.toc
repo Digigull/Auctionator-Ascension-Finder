@@ -1,5 +1,0 @@
-## Interface: 30300
-## Title: Auctionator - |cff00c000Finder Debug Data|r
-## Notes: Stores the Finder tab's last scan (item links and stats) for offline analysis. Safe to delete.
-## Author: Auctionator Finder mod
-## SavedVariables: AUCTIONATOR_FINDER_DEBUG

@@ -3,7 +3,7 @@ AUCTIONATOR + FINDER TAB (Ascension.gg edition) - SHARING GUIDE
 
 WHAT TO PACKAGE
 ---------------
-Zip these four folders from your Interface/AddOns/ directory, keeping the
+Zip these three folders from your Interface/AddOns/ directory, keeping the
 folder structure intact:
 
   Auctionator/                    (the full folder - includes the three
@@ -12,9 +12,6 @@ folder structure intact:
                                    plus all original files, Images/, Locales/)
   Auctionator_Price_Database/     (original stub - price DB storage)
   Auctionator_Pricing_History/    (original stub - history storage)
-  Auctionator_Finder_Debug/       (new stub - optional debug dumps; the
-                                   addon works fine without it, only the
-                                   Debug checkbox becomes a no-op)
 
 Installation for recipients: extract all folders into
   <Ascension>/Interface/AddOns/
@@ -30,7 +27,6 @@ MODIFIED / NEW FILES (vs the warperia / Ascension-Addons build)
   Auctionator.toc        - loads AuctionatorFinder.lua; adds
                            AUCTIONATOR_FINDER_SETTINGS to SavedVariables
   AuctionatorFinder.lua  - NEW: the entire Finder tab
-  Auctionator_Finder_Debug/Auctionator_Finder_Debug.toc - NEW stub addon
 
 DISTRIBUTION CHANNELS (Ascension-specific)
 ------------------------------------------
@@ -72,8 +68,6 @@ cleanest way to honor that lineage.
 SUPPORT NOTES FOR YOUR USERS
 ----------------------------
 - Settings (Compare, No Warn) persist per account automatically.
-- Debug is intentionally session-only; when enabled, scans are written to
-  SavedVariables/Auctionator_Finder_Debug.lua on /reload or logout.
 - Known Ascension quirk: the server rescales item levels and level
   requirements; the Finder displays the base values the AH API reports
   and enforces the level-range filter against those displayed values.
