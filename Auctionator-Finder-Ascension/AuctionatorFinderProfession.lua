@@ -483,7 +483,22 @@ local gProfSort_Profit   = nil;                 -- cached index -> profit map
 local gProfSort_Sig      = nil;                 -- signature the cache was built for
 local gProfSort_InRemap  = false;               -- guards our own remap against re-entry
 local gProfSort_Suspend  = false;               -- true while expanding categories: skip the sort pass
+local gProfSort_HiTex    = nil;                  -- our own faint selection texture
 Atr_ProfSort_LastError   = nil;                 -- last remap error, for /atrprofsort diagnostics
+
+-- Our own selection highlight: a faint, transparent bar we fully control, drawn
+-- in the BACKGROUND layer so it sits BEHIND the row text.  We use this instead
+-- of moving the stock TradeSkillHighlightFrame -- reparenting/resizing that
+-- shared frame leaked into (and broke) the normal, sort-off highlight.  Created
+-- lazily on the frame that owns the list button it will sit over.
+local function Atr_ProfSort_HiTexFor(btn)
+    if (btn == nil or type(btn.CreateTexture) ~= "function") then return nil; end
+    if (gProfSort_HiTex == nil) then
+        gProfSort_HiTex = btn:CreateTexture(nil, "BACKGROUND");
+        gProfSort_HiTex:SetTexture(1, 0.82, 0, 0.16);   -- faint gold, mostly transparent
+    end
+    return gProfSort_HiTex;
+end
 
 local function Atr_ProfSort_Enabled()
     return (AUCTIONATOR_FINDER_SETTINGS ~= nil) and (AUCTIONATOR_FINDER_SETTINGS.profSort == true);
@@ -555,31 +570,33 @@ local function Atr_ProfSort_Remap()
                 if (btn.SetID) then btn:SetID(realIndex); end   -- stock click/selection reads GetID(): keep it real
                 btn:Show();
 
-                local isSel = (selected == realIndex);
-                if (isSel) then selectedBtn = btn; end
-                if (btn.LockHighlight and btn.UnlockHighlight) then
-                    if (isSel) then btn:LockHighlight(); else btn:UnlockHighlight(); end
-                end
+                if (selected == realIndex) then selectedBtn = btn; end
+                if (btn.UnlockHighlight) then btn:UnlockHighlight(); end   -- clear any stray mouse-over lock
             else
                 btn:Hide();
             end
         end
     end
 
-    -- Move the selection overlay to the sorted row.  TradeSkillHighlightFrame is
-    -- a separate frame the stock update anchors by NATURAL position, so after we
-    -- reorder it lingers on the wrong (often scrolled-away) row -- which is why
-    -- the selection looked lost.  Re-anchor it to the button that now shows the
-    -- selected recipe, or hide it when that recipe is scrolled out of view.
-    if (TradeSkillHighlightFrame) then
-        if (selectedBtn and TradeSkillHighlightFrame.SetParent) then
-            TradeSkillHighlightFrame:SetParent(selectedBtn);
-            TradeSkillHighlightFrame:ClearAllPoints();
-            TradeSkillHighlightFrame:SetPoint("TOPLEFT",     selectedBtn, "TOPLEFT",     0, 0);
-            TradeSkillHighlightFrame:SetPoint("BOTTOMRIGHT", selectedBtn, "BOTTOMRIGHT", 0, 0);
-            TradeSkillHighlightFrame:Show();
+    -- The stock TradeSkillHighlightFrame anchors itself by the recipe's NATURAL
+    -- position, so once we reorder it points at the wrong (usually scrolled-away)
+    -- row.  We do NOT touch its parent or points (doing so leaked into the normal
+    -- sort-off highlight) -- we only HIDE it while sorting, and draw our own faint
+    -- bar on the correct row instead.  Stock re-shows it when the sort is off.
+    if (TradeSkillHighlightFrame and TradeSkillHighlightFrame.Hide) then
+        TradeSkillHighlightFrame:Hide();
+    end
+
+    local hi = Atr_ProfSort_HiTexFor(selectedBtn);
+    if (hi) then
+        if (selectedBtn) then
+            hi:SetParent(selectedBtn);
+            hi:ClearAllPoints();
+            hi:SetPoint("TOPLEFT",     selectedBtn, "TOPLEFT",     0, 0);
+            hi:SetPoint("BOTTOMRIGHT", selectedBtn, "BOTTOMRIGHT", 0, 0);
+            hi:Show();
         else
-            TradeSkillHighlightFrame:Hide();
+            hi:Hide();
         end
     end
 
@@ -627,6 +644,7 @@ local function Atr_ProfSort_Wrapper(...)
             Atr_ProfSort_LastError = tostring(err);
             if (AUCTIONATOR_FINDER_SETTINGS) then AUCTIONATOR_FINDER_SETTINGS.profSort = false; end
             if (gProfSort_Check) then gProfSort_Check:SetChecked(nil); end
+            if (gProfSort_HiTex) then gProfSort_HiTex:Hide(); end               -- drop our selection bar
             if (Atr_ProfSort_OrigUpdate) then Atr_ProfSort_OrigUpdate(); end   -- redraw a clean stock list
             if (DEFAULT_CHAT_FRAME) then
                 DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Sort by Profit hit a snag and was turned off: |cffff8888"
@@ -658,7 +676,7 @@ local function Atr_ProfSort_CreateCheckbox()
     chk:SetHeight(20);
     -- Up in the title bar, in the gap between the portrait and the centred
     -- profession title.  A small box + short label so it fits that strip.
-    chk:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 62, -6);
+    chk:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 76, -15);
 
     local label = _G["Atr_ProfSort_CheckText"];
     if (label) then
@@ -674,7 +692,11 @@ local function Atr_ProfSort_CreateCheckbox()
         local on = self:GetChecked() and true or false;
         AUCTIONATOR_FINDER_SETTINGS.profSort = on;
         gProfSort_Broken = false;                       -- a re-tick clears a prior snag and retries
-        if (on) then Atr_ProfSort_ExpandAll(); end
+        if (on) then
+            Atr_ProfSort_ExpandAll();
+        elseif (gProfSort_HiTex) then
+            gProfSort_HiTex:Hide();                     -- our bar must not linger once the sort is off
+        end
         Atr_ProfSort_Refresh();
     end);
 
