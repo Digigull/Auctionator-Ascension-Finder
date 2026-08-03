@@ -1,8 +1,13 @@
 # Vendor price estimator — shipped behaviour
 
-**Status: CLOSED (2026-07).** The estimator performs well enough and the
-research programme is finished. This file documents what shipped and what it
-costs. It is a *reference*, not a research log.
+**Status: REOPENED (2026-08).** A fresh 500-sale calibration dump showed the
+"closed" 4.1% figure was an in-sample backtest artifact; honest live accuracy
+is ~10% (all predictions) / ~18% (novel instances), dominated by the rung-free
+`est` tier at ~20%. The active plan is **not** to refit the shape (proven
+marginal) but to ship a bundled table of confirmed prices so fresh installs
+resolve via `learned`/`interp` instead of `est` — see
+`VENDOR-SEED-PLAN.md`. This file documents what shipped and what it costs. It
+is a *reference*, not a research log.
 
 The evidence trail — four measured ladders, five live case studies, the harvest
 datasets and the harvest #4/#5 shopping protocols — is archived in
@@ -91,24 +96,46 @@ wrong. A ratio lower than the rule track never lowers it.
 
 ## Measured accuracy
 
-Live backtest, 205 recorded sales replayed against the shipped estimator using
-each row's own sale-time `bp`/`bil`/`brq` snapshot (13 pre-`brq` rows excluded
-as backtest artifacts):
+**Two numbers, and the gap between them is the whole point.**
+
+**(1) Offline replay (optimistic).** 205 recorded sales replayed against the
+estimator using each row's own `bp`/`bil`/`brq` snapshot gave median 4.1%. This
+number **leaks**: the replay runs against the *current* `.obs`, which already
+contains the very sales being scored, so most rows resolve via the `learned`
+tier and the score is not out-of-sample. It was historically read as "the work
+is done" — it is not a live figure.
+
+**(2) Live calibration (honest).** Every scaled sale records `smp.pp`/`smp.pt`
+*before* the observation is written (see the recorder in `AuctionatorHints.lua`),
+so a first sale of a tuple is genuinely out-of-sample. Replaying the 500-row
+`.log` from the 2026-08 dump on those recorded predictions:
 
 ```
-ALL rows        n=176   median 4.1%   <=25%: 79%   <=50%: 86%
-OUT-OF-SAMPLE   n=128   median 4.1%   <=25%: 76%   <=50%: 86%
-  up-scale      n=147   median 2.4%
-  base shelf    n= 11   median 0.0%
-  down (<=-4)   n= 18   median 6.1%
+ALL predictions      n=498   median 10.3%   <=25%: 62%   <=50%: 75%
+NOVEL instances      n=442   median 18.5%   (excludes learned-tier resales)
+
+by tier:
+  learned  n= 56   median  0.0%   ( 11% of preds — exact tuple resold)
+  plateau  n= 60   median  0.0%   ( 12% — but p90 73%, bimodal)
+  interp   n=  4   median  2.9%   (  0% — almost never has bracketing rungs)
+  est      n=378   median 20.5%   ( 75% — the rung-free cross-item shape)
 ```
 
-Out-of-sample scores identically to fitted — the shape is not overfitted. For
-comparison on held-out points: "assume capped" median 12.2% but worst 360%;
-"geometric mid" 29.3%; "assume base" 50.0%.
+**The est tier is 75% of live predictions and is structurally floored at ~20%**
+because it uses the polluted cached `bil` as a base proxy (trusted base covers
+1 of 361 est items). Region bias exists in the tails (down −4..−7 predicts ~28%
+low; ≥+11 predicts ~13% high) but correcting it does not move the median —
+the shelf/rising bulk is already unbiased noise, and blanket corrections regress
+the whole set (10.3% → 11.7%). Best achievable single-multiplier fit for the
+worst bucket only moves it 28.8% → 23.4%. **Refitting the shape is a dead end.**
 
-**This is the number that says the work is done.** If a future change moves
-median error above ~8%, that is a regression, not noise.
+The lever with real headroom is shrinking the est *share*, not its error —
+i.e. shipping confirmed prices so more predictions resolve via `learned`/`interp`
+(0–3%). That is `VENDOR-SEED-PLAN.md`.
+
+Prior regression bar (retained for the shape itself): if a change moves the
+offline-replay median above ~8%, the shape regressed. But note that bar was
+never the live number.
 
 ## Data
 
