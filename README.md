@@ -128,9 +128,35 @@ aggressive way, so opening an NPC or a profession window doesn't stutter:
   a partial scan.
 
 This lives in `AuctionatorFinderMerchant.lua` (NPC + Bazaar merchant scan),
-`AuctionatorFinderProfession.lua` (trade-skill scan — the home for future
-"most profitable recipe" filter/sort features), and the shared
-`AuctionatorFinderScanThrottle.lua` session ledger.
+`AuctionatorFinderProfession.lua` (trade-skill scan + the profitability sort
+below), and the shared `AuctionatorFinderScanThrottle.lua` session ledger.
+
+---
+
+## Profession window — Sort by Profit
+
+A **Sort by Profit** checkbox sits just above the top-left corner of any
+profession window (Alchemy, Tailoring, …). Tick it and the recipe list is
+re-ranked so the items you can craft at the biggest profit come **first** and
+the least profitable — or loss-making — come **last**; each row shows a short
+green **+profit** / red **−loss** figure. Profit is the produced item's
+auction price minus what its reagents cost (the same NPC → auction →
+vendor-sell cascade the Crafted Goods Margin filter and the craft-cost
+tooltip use).
+
+- **Composes with the built-in controls** — the subclass / slot dropdowns, the
+  *Have Materials* checkbox and the search box still narrow the list; the sort
+  simply re-ranks whatever survives them. Ticking the box expands every
+  collapsed category first, so nothing hides from the ranking.
+- **Unpriceable recipes sink to the bottom** — a recipe with a reagent we can't
+  price yet, or a produced item with no auction price, ranks below every priced
+  recipe rather than guessing a wrong number. Coverage grows as you scan the AH
+  and visit vendors.
+- **Never breaks the window** — the reorder rewrites only the visible list
+  rows, on top of Blizzard's own update, and is fully error-guarded: on any
+  surprise from this custom client it turns itself off and falls straight back
+  to the stock list. Off by default; the setting is remembered per account
+  (`AUCTIONATOR_FINDER_SETTINGS.profSort`).
 
 ---
 

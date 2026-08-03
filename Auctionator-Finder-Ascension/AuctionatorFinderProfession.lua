@@ -260,3 +260,315 @@ if (type(CreateFrame) == "function") then
         end
     end);
 end
+
+-- PROFITABILITY SORT: "Sort by Profit" checkbox on the profession window ------
+--
+-- A checkbox that sits just above the trade-skill window's top-left corner.
+-- When ticked, the recipe list is reordered so the items you can craft at the
+-- biggest profit sit at the top and the least profitable (or loss-making) sit
+-- at the bottom.  Recipes we cannot fully price (a reagent with no known cost,
+-- or a produced item with no auction price) sink below every priced recipe,
+-- keeping the ranked part of the list trustworthy.
+--
+-- It composes WITH the window's built-in controls, not instead of them: the
+-- subclass / slot dropdowns, the "Have Materials" checkbox and the search box
+-- all narrow what GetTradeSkillInfo returns, and we simply re-rank whatever
+-- survives those filters.  Category headers are dropped while sorting (a flat
+-- ranked list is the whole point), so turning the box on expands every
+-- collapsed category first, so nothing hides from the ranking.
+--
+-- How the reorder works without fighting Blizzard's (skinned) UI: we do NOT
+-- rebuild the window.  TradeSkillFrame_Update is wrapped so the ORIGINAL runs
+-- first (it styles the rows, updates the rank bar, the reagent panel, the
+-- create button -- everything), and then, only while the box is ticked, we
+-- rewrite just the visible list buttons to point at our ranked order.  Each
+-- button keeps a REAL trade-skill index as its ID, so clicking, selecting,
+-- the detail pane and Create all keep working through stock code untouched.
+-- The whole rewrite is pcall-guarded: any surprise on this custom client
+-- disables the feature and falls straight back to the stock list rather than
+-- leaving a broken window.
+--
+-- Profit per item = the produced item's auction price (Atr_GetAuctionPrice)
+-- minus what its reagents cost, divided by the recipe's yield.  Reagent cost
+-- uses the same cascade the Crafted Goods Margin filter uses: fixed NPC price
+-- first (vials, thread, ...), then auction price, then the vendor-sell floor.
+
+-- Reagent unit cost in copper, or nil when we cannot price it at all.  Mirrors
+-- the cascade in Atr_Craft_GetCraftCost, read live from the open window here.
+local function Atr_ProfSort_ReagentPrice(id, name)
+    local price = (id and Atr_GetNPCPrice) and tonumber(Atr_GetNPCPrice(id)) or nil;
+    if (price == nil or price <= 0) then
+        price = (name and Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
+    end
+    if (price == nil or price <= 0) then
+        local key = id or name;
+        price = (key and Atr_GetSellValue) and tonumber(Atr_GetSellValue(key)) or nil;
+    end
+    return price;
+end
+
+-- Per-item craft profit for trade-skill row i, in copper, or nil when it can't
+-- be totalled (not a real recipe, unpriced produced item, or any reagent we
+-- can't price).  Returns  profit, cost, sell  so a caller can show the parts.
+-- Global so the mock-WoW harness can unit-test the maths without a real window.
+function Atr_ProfSort_RowProfit(i)
+    if (type(GetTradeSkillInfo) ~= "function") then return nil; end
+    local name, skillType = GetTradeSkillInfo(i);
+    if (skillType == "header" or name == nil) then return nil; end
+
+    local sell = (Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
+    if (sell == nil or sell <= 0) then return nil; end   -- no market price to rank on
+
+    local made = 1;
+    if (type(GetTradeSkillNumMade) == "function") then
+        local lo = GetTradeSkillNumMade(i);
+        made = tonumber(lo) or 1;
+        if (made < 1) then made = 1; end
+    end
+
+    local numR = (type(GetTradeSkillNumReagents) == "function") and (GetTradeSkillNumReagents(i) or 0) or 0;
+    if (numR == 0) then return nil; end
+
+    local total = 0;
+    for j = 1, numR do
+        local rname, _, rcount = GetTradeSkillReagentInfo(i, j);
+        local rlink = (type(GetTradeSkillReagentItemLink) == "function") and GetTradeSkillReagentItemLink(i, j) or nil;
+        local rid   = (rlink and zc and zc.ItemIDfromLink) and tonumber((zc.ItemIDfromLink(rlink))) or nil;   -- extra parens: returns 3 values
+        local price = Atr_ProfSort_ReagentPrice(rid, rname);
+        if (price == nil or price <= 0) then return nil; end   -- one unpriceable reagent -> whole recipe unranked
+        total = total + price * (tonumber(rcount) or 1);
+    end
+
+    local cost = math.floor(total / made);
+    return (sell - cost), cost, sell;
+end
+
+-- Walk the open trade skill and return  order, profitByIndex  where order is a
+-- list of REAL skill indices (headers dropped) ranked profit-descending, and
+-- profitByIndex maps each of those indices to its per-item profit (nil =
+-- unpriceable).  Priced recipes rank above every unpriceable one; ties and
+-- unpriceable rows keep their original list order (a stable sort).  Global for
+-- the harness.
+function Atr_ProfSort_BuildOrder()
+    local n = (type(GetNumTradeSkills) == "function") and (GetNumTradeSkills() or 0) or 0;
+    local entries, profitByIndex = {}, {};
+    for i = 1, n do
+        local _, skillType = GetTradeSkillInfo(i);
+        if (skillType and skillType ~= "header") then
+            local p = Atr_ProfSort_RowProfit(i);
+            profitByIndex[i] = p;
+            entries[#entries + 1] = { index = i, profit = p, seq = #entries + 1 };
+        end
+    end
+
+    table.sort(entries, function(a, b)
+        if (a.profit == nil and b.profit == nil) then return a.seq < b.seq; end
+        if (a.profit == nil) then return false; end   -- unpriceable sinks below anything priced
+        if (b.profit == nil) then return true; end
+        if (a.profit ~= b.profit) then return a.profit > b.profit; end   -- most profit first
+        return a.seq < b.seq;   -- stable tie-break
+    end);
+
+    local order = {};
+    for k, e in ipairs(entries) do order[k] = e.index; end
+    return order, profitByIndex;
+end
+
+-- Compact signed copper -> short coloured string ("+12g" / "-3s" / "+40c").
+-- Only the largest non-zero denomination is shown so the row stays short.
+local function Atr_ProfSort_MoneyShort(c)
+    local neg = (c < 0);
+    local a   = neg and -c or c;
+    local g   = math.floor(a / 10000);
+    local s   = math.floor((a % 10000) / 100);
+    local str;
+    if     (g > 0) then str = g .. "g";
+    elseif (s > 0) then str = s .. "s";
+    else                str = a .. "c"; end
+    local col = neg and "|cffff5555" or "|cff55ff55";
+    return col .. (neg and "-" or "+") .. str .. "|r";
+end
+
+-- ---- reorder state + UI ----------------------------------------------------
+
+local Atr_ProfSort_OrigUpdate;                 -- saved stock TradeSkillFrame_Update
+local gProfSort_Check;                          -- the checkbox frame
+local gProfSort_Broken   = false;               -- a render error disables us for the session
+local gProfSort_Order    = nil;                 -- cached ranked index list
+local gProfSort_Profit   = nil;                 -- cached index -> profit map
+local gProfSort_Sig      = nil;                 -- signature the cache was built for
+
+local function Atr_ProfSort_Enabled()
+    return (AUCTIONATOR_FINDER_SETTINGS ~= nil) and (AUCTIONATOR_FINDER_SETTINGS.profSort == true);
+end
+
+-- A cheap fingerprint of the current (filtered) list.  Same profession, same
+-- count and same first/last row name -> same list, so scrolling reuses the
+-- ranked order and only a real filter/list change rebuilds it.
+local function Atr_ProfSort_Signature()
+    if (type(GetNumTradeSkills) ~= "function") then return "0"; end
+    local n     = GetNumTradeSkills() or 0;
+    local prof  = (type(GetTradeSkillLine) == "function" and GetTradeSkillLine()) or "?";
+    local first = (n > 0) and select(1, GetTradeSkillInfo(1)) or "";
+    local last  = (n > 0) and select(1, GetTradeSkillInfo(n)) or "";
+    return prof .. "#" .. n .. "#" .. tostring(first) .. "#" .. tostring(last);
+end
+
+-- Rewrite the visible list buttons to our ranked order.  Called only while the
+-- box is ticked, always after the stock update has run.  Errors here are
+-- caught by the wrapper, which then falls back to the stock list.
+local function Atr_ProfSort_Remap()
+    local scroll = TradeSkillListScrollFrame;
+    if (scroll == nil) then return; end
+
+    local DISPLAYED = (type(TRADE_SKILLS_DISPLAYED) == "number" and TRADE_SKILLS_DISPLAYED) or 8;
+    local HEIGHT    = (type(TRADE_SKILL_HEIGHT)    == "number" and TRADE_SKILL_HEIGHT)    or 16;
+
+    local sig = Atr_ProfSort_Signature();
+    if (sig ~= gProfSort_Sig or gProfSort_Order == nil) then
+        gProfSort_Order, gProfSort_Profit = Atr_ProfSort_BuildOrder();
+        gProfSort_Sig = sig;
+    end
+    local order   = gProfSort_Order or {};
+    local numRows = #order;
+
+    local offset = FauxScrollFrame_GetOffset(scroll) or 0;
+    local maxOff = numRows - DISPLAYED;
+    if (maxOff < 0) then maxOff = 0; end
+    if (offset > maxOff) then offset = maxOff; end
+
+    for i = 1, DISPLAYED do
+        local btn = _G["TradeSkillSkill" .. i];
+        if (btn) then
+            local pos = offset + i;
+            if (pos <= numRows) then
+                local realIndex = order[pos];
+                local name, skillType, numAvailable = GetTradeSkillInfo(realIndex);
+                local text = name or "?";
+                if (numAvailable and numAvailable > 0) then text = text .. " [" .. numAvailable .. "]"; end
+                local profit = gProfSort_Profit and gProfSort_Profit[realIndex];
+                if (profit ~= nil) then text = text .. "  " .. Atr_ProfSort_MoneyShort(profit); end
+
+                btn:SetText(text);
+
+                local color = (type(TradeSkillTypeColor) == "table") and TradeSkillTypeColor[skillType] or nil;
+                if (color) then
+                    btn:SetTextColor(color.r, color.g, color.b);
+                    if (color.font and btn.SetNormalFontObject) then btn:SetNormalFontObject(color.font); end
+                else
+                    btn:SetTextColor(1, 1, 1);
+                end
+
+                btn:SetID(realIndex);              -- stock click/selection reads GetID(): keep it real
+                btn:Show();
+
+                if (TradeSkillFrame and TradeSkillFrame.selectedSkill == realIndex) then
+                    btn:LockHighlight();
+                else
+                    btn:UnlockHighlight();
+                end
+            else
+                btn:Hide();
+            end
+        end
+    end
+
+    FauxScrollFrame_Update(scroll, numRows, DISPLAYED, HEIGHT);   -- range = ranked count, not the stock total
+end
+
+-- Expand every collapsed category so no recipe hides from the ranking.  Only
+-- called from the checkbox click (a safe context) and window-open, never from
+-- inside the update wrapper, to avoid re-entrant expand storms.
+local function Atr_ProfSort_ExpandAll()
+    if (type(GetNumTradeSkills) ~= "function" or type(ExpandTradeSkillSubClass) ~= "function") then return; end
+    local n = GetNumTradeSkills() or 0;
+    for i = n, 1, -1 do   -- bottom-up: expanding header i only inserts rows after i
+        local _, skillType, _, isExpanded = GetTradeSkillInfo(i);
+        if (skillType == "header" and not isExpanded) then
+            ExpandTradeSkillSubClass(i);
+        end
+    end
+end
+
+-- TradeSkillFrame_Update wrapper: stock first (styles rows + the rest of the
+-- window), then our ranked rewrite of the list when the box is ticked.
+local function Atr_ProfSort_Wrapper(...)
+    if (Atr_ProfSort_OrigUpdate) then Atr_ProfSort_OrigUpdate(...); end
+    if (Atr_ProfSort_Enabled() and not gProfSort_Broken) then
+        local ok = pcall(Atr_ProfSort_Remap);
+        if (not ok) then
+            gProfSort_Broken = true;
+            if (AUCTIONATOR_FINDER_SETTINGS) then AUCTIONATOR_FINDER_SETTINGS.profSort = false; end
+            if (gProfSort_Check) then gProfSort_Check:SetChecked(nil); end
+            if (Atr_ProfSort_OrigUpdate) then Atr_ProfSort_OrigUpdate(); end   -- redraw a clean stock list
+            if (DEFAULT_CHAT_FRAME) then
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Sort by Profit hit a snag on this UI and was turned off.");
+            end
+        end
+    end
+end
+
+local function Atr_ProfSort_InstallHook()
+    if (Atr_ProfSort_OrigUpdate) then return; end                 -- already installed
+    if (type(TradeSkillFrame_Update) ~= "function") then return; end
+    Atr_ProfSort_OrigUpdate = TradeSkillFrame_Update;
+    TradeSkillFrame_Update  = Atr_ProfSort_Wrapper;
+end
+
+-- Re-rank and redraw now (e.g. right after the box is clicked).
+local function Atr_ProfSort_Refresh()
+    gProfSort_Order, gProfSort_Profit, gProfSort_Sig = nil, nil, nil;   -- force a rebuild
+    if (type(TradeSkillFrame_Update) == "function") then TradeSkillFrame_Update(); end
+end
+
+local function Atr_ProfSort_CreateCheckbox()
+    if (gProfSort_Check) then return; end
+    if (type(CreateFrame) ~= "function" or TradeSkillFrame == nil) then return; end   -- retry on the next open
+
+    local chk = CreateFrame("CheckButton", "Atr_ProfSort_Check", TradeSkillFrame, "UICheckButtonTemplate");
+    chk:SetWidth(24);
+    chk:SetHeight(24);
+    chk:SetPoint("BOTTOMLEFT", TradeSkillFrame, "TOPLEFT", 12, 0);   -- sits just above the window's top edge
+
+    local label = _G["Atr_ProfSort_CheckText"];
+    if (label) then label:SetText("Sort by Profit"); end
+
+    AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
+    chk:SetChecked(AUCTIONATOR_FINDER_SETTINGS.profSort and true or nil);
+
+    chk:SetScript("OnClick", function(self)
+        AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
+        local on = self:GetChecked() and true or false;
+        AUCTIONATOR_FINDER_SETTINGS.profSort = on;
+        gProfSort_Broken = false;                       -- a re-tick clears a prior snag and retries
+        if (on) then Atr_ProfSort_ExpandAll(); end
+        Atr_ProfSort_Refresh();
+    end);
+
+    chk:SetScript("OnEnter", function(self)
+        if (GameTooltip == nil) then return; end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT");
+        GameTooltip:AddLine("Sort by Profit");
+        GameTooltip:AddLine("Ranks the recipes you can make most profitable first,", 1, 1, 1, true);
+        GameTooltip:AddLine("least profitable last. The window's own filters still apply.", 1, 1, 1, true);
+        GameTooltip:AddLine("Profit = the item's auction price minus its reagent cost.", 0.7, 0.7, 0.7, true);
+        GameTooltip:Show();
+    end);
+    chk:SetScript("OnLeave", function() if (GameTooltip) then GameTooltip:Hide(); end end);
+
+    gProfSort_Check = chk;
+    Atr_ProfSort_InstallHook();
+end
+
+-- Build the checkbox the first time a profession window opens (TradeSkillFrame
+-- is real by then), and force a fresh ranking for the newly-opened list.
+if (type(CreateFrame) == "function") then
+    local cf = CreateFrame("Frame");
+    cf:RegisterEvent("TRADE_SKILL_SHOW");
+    cf:SetScript("OnEvent", function()
+        Atr_ProfSort_CreateCheckbox();
+        gProfSort_Order, gProfSort_Profit, gProfSort_Sig = nil, nil, nil;   -- new window -> rebuild
+        if (Atr_ProfSort_Enabled() and not gProfSort_Broken) then Atr_ProfSort_ExpandAll(); end
+    end);
+end
+-- PROFITABILITY SORT end -----------------------------------------------------
