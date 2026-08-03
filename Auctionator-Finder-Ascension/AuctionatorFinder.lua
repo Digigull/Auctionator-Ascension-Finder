@@ -1072,7 +1072,8 @@ function Fdr_AHVariant_Record (rec)
 	if (type (rec) ~= "table" or not Atr_AHVariant_Note) then return false; end
 	if (not (rec.scaled and rec.equippable)) then return false; end
 
-	local itemID = Fdr_ResearchItemID (rec.link);
+	local link   = rec.link;
+	local itemID = link and tonumber (link:match ("|Hitem:(%d+)") or link:match ("^item:(%d+)"));
 	local ilvl   = tonumber (rec.trueIlvl or 0) or 0;
 	local req    = tonumber (rec.level or 0) or 0;
 	if (not itemID or ilvl <= 0 or req <= 0) then return false; end
