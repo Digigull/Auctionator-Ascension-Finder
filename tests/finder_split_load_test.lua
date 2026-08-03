@@ -79,4 +79,10 @@ load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderFullScan.lua")
 ok (type (Fdr_FS_Running) == "function", "full-scan split defines Fdr_FS_Running")
 ok (type (Atr_FullScanStart) == "function", "full-scan split defines Atr_FullScanStart")
 
+-- ---- scanning options rows split ----
+load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderOptions.lua")
+
+ok (type (Fdr_Options_Sync) == "function", "options split defines Fdr_Options_Sync")
+ok (type (Fdr_Options_Init) == "function", "options split defines Fdr_Options_Init")
+
 print ("\nALL FINDER SPLIT LOAD TESTS PASSED (" .. pass .. " checks)")

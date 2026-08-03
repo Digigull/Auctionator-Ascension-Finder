@@ -23,6 +23,7 @@ local CORE = DIR .. "AuctionatorFinder.lua"
 local SPLITS = {
   DIR .. "AuctionatorFinderPriceDB.lua",
   DIR .. "AuctionatorFinderFullScan.lua",
+  DIR .. "AuctionatorFinderOptions.lua",
 }
 
 local function read (p)
