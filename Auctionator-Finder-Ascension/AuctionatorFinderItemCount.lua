@@ -1,31 +1,40 @@
--- FINDER: item quantity + bag locations on tooltips ---------------------------
+-- FINDER: item quantity + storage locations on tooltips -----------------------
 --
--- Adds a "Qty: N" line to item tooltips telling you how many of that item you
--- own, and -- when a modifier is held -- WHERE they are (which character, and
--- whether the stack is in bags or the bank).  Kept in its own file so the
--- tooltip/pricing code in AuctionatorHints.lua does not grow another feature.
+-- Adds a "Qty" line to item tooltips telling you how many of that item you own,
+-- and -- when a modifier is held -- WHERE they are: which character (bags vs.
+-- bank) and how many sit in the account-wide web-shop banks.  Kept in its own
+-- file so the tooltip/pricing code in AuctionatorHints.lua does not grow another
+-- feature; the only touch there is one guarded call.
 --
--- Why a cache, and why account-wide.  The client can only READ a container's
--- contents while that container's window is open: away from a bank, the bank
--- slots read back nil.  So we cannot ask "how many do I own" on the fly -- we
--- have to REMEMBER what each container held the last time we saw it.  Each
--- character records its own bags (always readable, kept fresh off BAG_UPDATE)
--- and its bank (snapshotted whenever the bank frame is open) into an
--- account-wide saved variable, so a tooltip can total the item across every
--- one of your characters from anywhere.
+-- Why a cache.  The client can only READ a container's contents while its window
+-- is open: away from a bank, the bank slots read back nil.  So we cannot ask
+-- "how many do I own" on the fly -- we have to REMEMBER what each container held
+-- the last time we saw it, in an account-wide saved variable.
 --
 --   AUCTIONATOR_ITEM_LOCATIONS = {
---       ["Realm-Charname"] = {
---           name=, realm=, class=, faction=, updated=,
---           bags = { [itemID] = count },   -- backpack (bags 0..NUM_BAG_SLOTS)
---           bank = { [itemID] = count },   -- character bank (-1 + bank bags)
+--       chars = {
+--           ["Realm-Charname"] = {
+--               name=, realm=, class=, faction=, updated=,
+--               bags = { [itemID]=count },   -- backpack (bags 0..NUM_BAG_SLOTS)
+--               bank = { [itemID]=count },   -- character bank (-1 + bank bags)
+--           },
+--       },
+--       webbanks = {                          -- shared, keyed by realm
+--           ["Realm"] = {
+--               personal = { updated=, ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },
+--               realm    = { updated=, ntabs=, totals={[id]=n}, tabs={[t]={[id]=n}} },
+--           },
 --       },
 --   }
 --
--- PHASE 1 covers the backpack and the character bank.  Ascension's web-shop
--- "personal" / "realm" banks and the guild bank (all of which render under the
--- guild-bank frame) come in a follow-up once their API surface is confirmed --
--- see Atr_ItemCount_ProbeGuildBank below, a diagnostic for exactly that.
+-- The web-shop "Personal Bank" and "Realm Bank" both render through the stock
+-- guild-bank API (GetGuildBankItemInfo etc.), and when either is open EVERY tab
+-- is readable at once -- no per-tab query needed.  They are told apart by tab 1's
+-- name: a "Realm Bank" tab present => the realm bank, otherwise the personal
+-- bank (tabs 2+ carry unreliable names, so only tab 1 is trusted).  The genuine
+-- GUILD bank reports zero tabs through this API and is a separate, opt-in
+-- follow-up -- see Atr_ItemCount_ProbeGuildBank, the diagnostic used to map all
+-- of the above.
 
 local addonName, addonTable = ...;
 local zc = addonTable and addonTable.zc or _G.zc;
@@ -42,9 +51,10 @@ local function ModeVisible (mode)
 end
 
 -----------------------------------------
--- Cache: keys, structure, scanning
+-- Cache: keys, structure, migration
 
-local gBankOpen = false;		-- true only between BANKFRAME_OPENED and _CLOSED
+local gBankOpen      = false;		-- between BANKFRAME_OPENED and _CLOSED (character bank)
+local gGuildBankOpen = false;		-- between GUILDBANKFRAME_OPENED and _CLOSED (web-shop bank)
 
 local function CharKey ()
 	local name  = UnitName ("player") or "?";
@@ -52,18 +62,35 @@ local function CharKey ()
 	return realm.."-"..name, name, realm;
 end
 
+-- Return the account-wide DB, upgrading a Phase-1 flat layout (characters stored
+-- at the top level) into the nested { chars=, webbanks= } shape in place.
 local function EnsureDB ()
 	if (type (AUCTIONATOR_ITEM_LOCATIONS) ~= "table") then
 		AUCTIONATOR_ITEM_LOCATIONS = {};
 	end
-	return AUCTIONATOR_ITEM_LOCATIONS;
+	local db = AUCTIONATOR_ITEM_LOCATIONS;
+
+	if (type (db.chars) ~= "table") then
+		local chars = {};
+		for k, v in pairs (db) do		-- lift any legacy top-level char entries
+			if (k ~= "chars" and k ~= "webbanks"
+			    and type (v) == "table" and (v.bags or v.bank)) then
+				chars[k] = v;
+			end
+		end
+		db.chars = chars;
+		for k in pairs (chars) do db[k] = nil; end
+	end
+
+	if (type (db.webbanks) ~= "table") then db.webbanks = {}; end
+	return db;
 end
 
 local function EnsureChar ()
 	local db = EnsureDB ();
 	local key, name, realm = CharKey ();
-	local e = db[key];
-	if (type (e) ~= "table") then e = {}; db[key] = e; end
+	local e = db.chars[key];
+	if (type (e) ~= "table") then e = {}; db.chars[key] = e; end
 	e.name  = name;
 	e.realm = realm;
 	local _, class = UnitClass ("player");
@@ -73,6 +100,17 @@ local function EnsureChar ()
 	if (type (e.bank) ~= "table") then e.bank = {}; end
 	return e;
 end
+
+local function EnsureWebBanks ()
+	local db = EnsureDB ();
+	local realm = GetRealmName () or "";
+	local w = db.webbanks[realm];
+	if (type (w) ~= "table") then w = {}; db.webbanks[realm] = w; end
+	return w;
+end
+
+-----------------------------------------
+-- Scanning: character bags + bank
 
 -- The backpack: bag 0 plus the four (NUM_BAG_SLOTS) equipped bags.
 local function BackpackBags ()
@@ -125,26 +163,83 @@ function Atr_ItemCount_ScanBank ()
 end
 
 -----------------------------------------
+-- Scanning: web-shop personal / realm banks (guild-bank API)
+
+-- Which web-shop bank, if any, is open?  Decided by tab 1's name: a "Realm Bank"
+-- tab present means the realm bank (its later tabs are misnamed "Personal Bank"
+-- but hold realm storage), otherwise a "Personal Bank" tab means the personal
+-- bank.  Zero tabs, or any other naming (the genuine guild bank), returns nil.
+local function ClassifyOpenBank ()
+	local n = (GetNumGuildBankTabs and GetNumGuildBankTabs ()) or 0;
+	if (n <= 0) then return nil, 0; end
+
+	local hasRealm, hasPersonal = false, false;
+	for i = 1, n do
+		local nm = GetGuildBankTabInfo (i) or "";
+		if (nm:find ("Realm"))    then hasRealm    = true; end
+		if (nm:find ("Personal")) then hasPersonal = true; end
+	end
+
+	if (hasRealm)    then return "realm",    n; end
+	if (hasPersonal) then return "personal", n; end
+	return nil, n;		-- real guild bank / unknown -> left alone
+end
+
+function Atr_ItemCount_ScanWebBank ()
+	if (not gGuildBankOpen) then return; end
+
+	local bankType, n = ClassifyOpenBank ();
+	if (not bankType) then return; end
+
+	local slots  = MAX_GUILDBANK_SLOTS_PER_TAB or 98;		-- stock tab is 14x7
+	local totals = {};
+	local tabs   = {};
+
+	for t = 1, n do
+		local tc = {};
+		for s = 1, slots do
+			local link = GetGuildBankItemLink (t, s);
+			if (link) then
+				local id = zc and zc.ItemIDfromLink (link);
+				id = tonumber (id);
+				if (id) then
+					local _, cnt = GetGuildBankItemInfo (t, s);
+					cnt = tonumber (cnt) or 1;
+					tc[id]     = (tc[id]     or 0) + cnt;
+					totals[id] = (totals[id] or 0) + cnt;
+				end
+			end
+		end
+		tabs[t] = tc;
+	end
+
+	local w = EnsureWebBanks ();
+	w[bankType] = { updated = time (), ntabs = n, totals = totals, tabs = tabs };
+end
+
+-----------------------------------------
 -- Query + rendering
 
--- Total the item across every cached character, returning the grand total and a
--- per-character breakdown sorted current-character-first, then largest holding.
+-- Total the item everywhere it is cached.  Returns:
+--   total     grand total across characters and this realm's web-shop banks
+--   charList  { {name,realm,class,bags,bank,isCurrent}, ... } current-char first
+--   webList   { {kind="personal"/"realm", label, count, tabs={idx,...}}, ... }
 function Atr_ItemCount_Query (itemID)
 	itemID = tonumber (itemID);
-	if (not itemID) then return 0, {}; end
+	if (not itemID) then return 0, {}, {}; end
 
 	local db     = EnsureDB ();
 	local curKey = CharKey ();
 	local total  = 0;
-	local list   = {};
+	local charList, webList = {}, {};
 
-	for key, e in pairs (db) do
+	for key, e in pairs (db.chars) do
 		if (type (e) == "table") then
 			local b = (type (e.bags) == "table" and e.bags[itemID]) or 0;
 			local k = (type (e.bank) == "table" and e.bank[itemID]) or 0;
 			if (b + k > 0) then
 				total = total + b + k;
-				list[#list+1] = {
+				charList[#charList+1] = {
 					name = e.name or key, realm = e.realm, class = e.class,
 					bags = b, bank = k, isCurrent = (key == curKey),
 				};
@@ -152,14 +247,37 @@ function Atr_ItemCount_Query (itemID)
 		end
 	end
 
-	table.sort (list, function (a, c)
+	table.sort (charList, function (a, c)
 		if (a.isCurrent ~= c.isCurrent) then return a.isCurrent; end
 		local at, ct = a.bags + a.bank, c.bags + c.bank;
 		if (at ~= ct) then return at > ct; end
 		return (a.name or "") < (c.name or "");
 	end);
 
-	return total, list;
+	-- This realm's web-shop banks, personal before realm.
+	local realm = GetRealmName () or "";
+	local w = db.webbanks[realm];
+	if (type (w) == "table") then
+		local order = { { "personal", ZT ("Personal Bank") }, { "realm", ZT ("Realm Bank") } };
+		for _, od in ipairs (order) do
+			local kind, label = od[1], od[2];
+			local bank = w[kind];
+			local n = bank and type (bank.totals) == "table" and bank.totals[itemID];
+			if (n and n > 0) then
+				total = total + n;
+				local hits = {};
+				if (type (bank.tabs) == "table") then
+					for t = 1, (bank.ntabs or 0) do
+						local tc = bank.tabs[t];
+						if (tc and tc[itemID] and tc[itemID] > 0) then hits[#hits+1] = t; end
+					end
+				end
+				webList[#webList+1] = { kind = kind, label = label, count = n, tabs = hits };
+			end
+		end
+	end
+
+	return total, charList, webList;
 end
 
 -- Class-coloured character name for the location lines.
@@ -179,18 +297,26 @@ function Atr_ItemCount_AddToTip (tip, itemID)
 	if (tip == nil or itemID == nil) then return; end
 	if (not ModeVisible (AUCTIONATOR_QTY_TIPS or 5)) then return; end
 
-	local total, list = Atr_ItemCount_Query (itemID);
+	local total, charList, webList = Atr_ItemCount_Query (itemID);
 	if (total <= 0) then return; end
 
 	tip:AddDoubleLine (ZT ("Qty"), "|cFFFFFFFF"..total.."|r");
 
 	local locMode = AUCTIONATOR_QTY_LOC_TIPS or 3;
 	if (ModeVisible (locMode)) then
-		for _, c in ipairs (list) do
+		for _, c in ipairs (charList) do
 			local parts = {};
 			if (c.bags and c.bags > 0) then parts[#parts+1] = c.bags.." "..ZT ("bags"); end
 			if (c.bank and c.bank > 0) then parts[#parts+1] = c.bank.." "..ZT ("bank"); end
 			tip:AddDoubleLine ("  "..ColorName (c), "|cFFCCCCCC"..table.concat (parts, ", ").."|r");
+		end
+		for _, b in ipairs (webList) do
+			local label = "  |cFFFFD100"..b.label.."|r";
+			if (#b.tabs > 0) then
+				label = label.." |cFF888888("..ZT ("tab")..(#b.tabs > 1 and "s" or "").." "
+				        ..table.concat (b.tabs, ", ")..")|r";
+			end
+			tip:AddDoubleLine (label, "|cFFCCCCCC"..b.count.."|r");
 		end
 	elseif (locMode == 1 or locMode == 2 or locMode == 3) then
 		-- Faint breadcrumb so the hidden locations are discoverable.
@@ -202,12 +328,10 @@ function Atr_ItemCount_AddToTip (tip, itemID)
 end
 
 -----------------------------------------
--- Diagnostic (Phase 2 groundwork)
+-- Diagnostics
 --
--- Ascension's personal/realm/guild banks all open under the guild-bank frame,
--- but nothing here tells a personal bank from a realm bank from a real guild
--- bank.  Run this with a web-shop bank (or the guild bank) OPEN to dump the
--- signals we could key off:  /run Atr_ItemCount_ProbeGuildBank()
+-- Map the guild-bank-family surface for a bank you have open:
+--   /run Atr_ItemCount_ProbeGuildBank()
 
 function Atr_ItemCount_ProbeGuildBank ()
 	local out = DEFAULT_CHAT_FRAME;
@@ -217,34 +341,39 @@ function Atr_ItemCount_ProbeGuildBank ()
 	p ("IsInGuild = "..tostring (IsInGuild and IsInGuild ()));
 	p ("GetGuildInfo(player) = "..tostring (GetGuildInfo and GetGuildInfo ("player")));
 
-	local title = _G["GuildBankFrameTitleText"];
-	p ("frame title = "..tostring (title and title.GetText and title:GetText ()));
-
 	local nTabs = GetNumGuildBankTabs and GetNumGuildBankTabs () or 0;
 	p ("GetNumGuildBankTabs = "..tostring (nTabs));
-	p ("GetCurrentGuildBankTab = "..tostring (GetCurrentGuildBankTab and GetCurrentGuildBankTab ()));
+	p ("classified as = "..tostring ((ClassifyOpenBank ())));
 
 	for t = 1, nTabs do
-		local name, icon, view, deposit, withdraw = GetGuildBankTabInfo (t);
-		p (string.format ("  tab %d: name=%s icon=%s canView=%s",
-			t, tostring (name), tostring (icon), tostring (view)));
+		local name, icon = GetGuildBankTabInfo (t);
+		p (string.format ("  tab %d: name=%s icon=%s", t, tostring (name), tostring (icon)));
 	end
 end
 
--- Quick sanity dump of what the cache currently holds:  /run Atr_ItemCount_Dump()
+-- Sanity dump of what the cache currently holds:  /run Atr_ItemCount_Dump()
 function Atr_ItemCount_Dump ()
 	local out = DEFAULT_CHAT_FRAME;
 	local function p (s) if (out) then out:AddMessage ("|cff44ddffAtrItemCount|r "..tostring (s)); end end
 	local db = EnsureDB ();
+
 	local nChars = 0;
-	for key, e in pairs (db) do
+	for key, e in pairs (db.chars) do
 		nChars = nChars + 1;
 		local nb, nk = 0, 0;
 		for _ in pairs (e.bags or {}) do nb = nb + 1; end
 		for _ in pairs (e.bank or {}) do nk = nk + 1; end
 		p (string.format ("%s: %d bag-stacks, %d bank-stacks", key, nb, nk));
 	end
-	p ("cached characters: "..nChars.."   bankOpen="..tostring (gBankOpen));
+	for realm, w in pairs (db.webbanks) do
+		for kind, bank in pairs (w) do
+			local ni = 0;
+			for _ in pairs (bank.totals or {}) do ni = ni + 1; end
+			p (string.format ("webbank %s/%s: %d items across %d tabs", realm, kind, ni, bank.ntabs or 0));
+		end
+	end
+	p ("cached characters: "..nChars.."   bankOpen="..tostring (gBankOpen)
+	   .."   guildBankOpen="..tostring (gGuildBankOpen));
 end
 
 -----------------------------------------
@@ -261,10 +390,14 @@ if (type (CreateFrame) == "function") then
 	f:RegisterEvent ("BANKFRAME_CLOSED");
 	f:RegisterEvent ("PLAYERBANKSLOTS_CHANGED");
 	f:RegisterEvent ("PLAYERBANKBAGSLOTS_CHANGED");
+	f:RegisterEvent ("GUILDBANKFRAME_OPENED");
+	f:RegisterEvent ("GUILDBANKFRAME_CLOSED");
+	f:RegisterEvent ("GUILDBANKBAGSLOTS_CHANGED");
+	f:RegisterEvent ("GUILDBANK_UPDATE_TABS");
 
-	local DELAY   = 0.4;		-- debounce the BAG_UPDATE / bank-slot storms
+	local DELAY   = 0.4;		-- debounce the update storms
 	local elapsed = 0;
-	local bagsDirty, bankDirty = false, false;
+	local bagsDirty, bankDirty, webDirty = false, false, false;
 
 	f:Hide ();				-- OnUpdate only ticks while shown; idle until armed
 
@@ -275,6 +408,12 @@ if (type (CreateFrame) == "function") then
 			gBankOpen = false;		-- last good snapshot stays in the saved var
 		elseif (event == "PLAYERBANKSLOTS_CHANGED" or event == "PLAYERBANKBAGSLOTS_CHANGED") then
 			if (gBankOpen) then bankDirty = true; end
+		elseif (event == "GUILDBANKFRAME_OPENED") then
+			gGuildBankOpen = true; webDirty = true;
+		elseif (event == "GUILDBANKFRAME_CLOSED") then
+			gGuildBankOpen = false;
+		elseif (event == "GUILDBANKBAGSLOTS_CHANGED" or event == "GUILDBANK_UPDATE_TABS") then
+			if (gGuildBankOpen) then webDirty = true; end
 		elseif (event == "BAG_UPDATE") then
 			bagsDirty = true;
 			if (gBankOpen) then bankDirty = true; end		-- bank bags report through BAG_UPDATE too
@@ -290,8 +429,9 @@ if (type (CreateFrame) == "function") then
 		if (elapsed >= DELAY) then
 			elapsed = 0;
 			self:Hide ();		-- one-shot: stop ticking before scanning
-			if (bagsDirty) then bagsDirty = false; pcall (Atr_ItemCount_ScanBags); end
-			if (bankDirty) then bankDirty = false; pcall (Atr_ItemCount_ScanBank); end
+			if (bagsDirty) then bagsDirty = false; pcall (Atr_ItemCount_ScanBags);    end
+			if (bankDirty) then bankDirty = false; pcall (Atr_ItemCount_ScanBank);    end
+			if (webDirty)  then webDirty  = false; pcall (Atr_ItemCount_ScanWebBank); end
 		end
 	end);
 end
