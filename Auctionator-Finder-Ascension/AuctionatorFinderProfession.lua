@@ -524,6 +524,9 @@ local function Atr_ProfSort_Remap()
     if (maxOff < 0) then maxOff = 0; end
     if (offset > maxOff) then offset = maxOff; end
 
+    local selected = TradeSkillFrame and TradeSkillFrame.selectedSkill;
+    local selectedBtn = nil;   -- the visible button showing the selected recipe, if any
+
     for i = 1, DISPLAYED do
         local btn = _G["TradeSkillSkill" .. i];
         if (btn) then
@@ -552,16 +555,31 @@ local function Atr_ProfSort_Remap()
                 if (btn.SetID) then btn:SetID(realIndex); end   -- stock click/selection reads GetID(): keep it real
                 btn:Show();
 
+                local isSel = (selected == realIndex);
+                if (isSel) then selectedBtn = btn; end
                 if (btn.LockHighlight and btn.UnlockHighlight) then
-                    if (TradeSkillFrame and TradeSkillFrame.selectedSkill == realIndex) then
-                        btn:LockHighlight();
-                    else
-                        btn:UnlockHighlight();
-                    end
+                    if (isSel) then btn:LockHighlight(); else btn:UnlockHighlight(); end
                 end
             else
                 btn:Hide();
             end
+        end
+    end
+
+    -- Move the selection overlay to the sorted row.  TradeSkillHighlightFrame is
+    -- a separate frame the stock update anchors by NATURAL position, so after we
+    -- reorder it lingers on the wrong (often scrolled-away) row -- which is why
+    -- the selection looked lost.  Re-anchor it to the button that now shows the
+    -- selected recipe, or hide it when that recipe is scrolled out of view.
+    if (TradeSkillHighlightFrame) then
+        if (selectedBtn and TradeSkillHighlightFrame.SetParent) then
+            TradeSkillHighlightFrame:SetParent(selectedBtn);
+            TradeSkillHighlightFrame:ClearAllPoints();
+            TradeSkillHighlightFrame:SetPoint("TOPLEFT",     selectedBtn, "TOPLEFT",     0, 0);
+            TradeSkillHighlightFrame:SetPoint("BOTTOMRIGHT", selectedBtn, "BOTTOMRIGHT", 0, 0);
+            TradeSkillHighlightFrame:Show();
+        else
+            TradeSkillHighlightFrame:Hide();
         end
     end
 
@@ -636,12 +654,17 @@ local function Atr_ProfSort_CreateCheckbox()
     if (type(CreateFrame) ~= "function" or TradeSkillFrame == nil) then return; end   -- retry on the next open
 
     local chk = CreateFrame("CheckButton", "Atr_ProfSort_Check", TradeSkillFrame, "UICheckButtonTemplate");
-    chk:SetWidth(24);
-    chk:SetHeight(24);
-    chk:SetPoint("BOTTOMLEFT", TradeSkillFrame, "TOPLEFT", 12, 0);   -- sits just above the window's top edge
+    chk:SetWidth(20);
+    chk:SetHeight(20);
+    -- Up in the title bar, in the gap between the portrait and the centred
+    -- profession title.  A small box + short label so it fits that strip.
+    chk:SetPoint("TOPLEFT", TradeSkillFrame, "TOPLEFT", 62, -6);
 
     local label = _G["Atr_ProfSort_CheckText"];
-    if (label) then label:SetText("Sort by Profit"); end
+    if (label) then
+        label:SetText("Sort Profit");
+        if (GameFontHighlightSmall) then label:SetFontObject(GameFontHighlightSmall); end   -- compact, fits the title strip
+    end
 
     AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
     chk:SetChecked(AUCTIONATOR_FINDER_SETTINGS.profSort and true or nil);
