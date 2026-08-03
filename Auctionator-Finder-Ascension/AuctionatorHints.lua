@@ -306,80 +306,12 @@ end
 -----------------------------------------
 
 -- FINDER_TAB: NPC (vendor-bought) trade-good prices -----------------------
--- Some crafting reagents are bought FROM an NPC at a fixed price and sold in
--- unlimited supply -- Empty Vial, Crystal Vial, Wooden Stock, thread, flux,
--- dyes, spices, and so on.  For those the going cost is the NPC price, not
--- whatever someone happens to relist them for on the AH, and their auction
--- number just misleads the crafting-cost maths.
---
--- We can't ask the client "is item X sold by a vendor"; that's only knowable
--- while a merchant window is open (GetMerchantItemInfo).  So we LEARN it: any
--- Trade Goods item a merchant offers at UNLIMITED stock for a plain gold price
--- is recorded in AUCTIONATOR_NPC_PRICES (account-wide) as itemID -> per-item
--- NPC buy price.  Presence in that table is exactly "this trade good is
--- normally sold by NPCs", and the value is its NPC price.  Coverage grows as
--- vendors are visited; nothing here needs a curated item list.
---
--- Note the deliberate naming: the addon already says "Vendor" for the price an
--- NPC pays YOU (the sell value from GetItemInfo).  This is the other
--- direction -- what you PAY an NPC to buy it -- so it is called the NPC price
--- throughout, never "vendor".
-
-function Atr_NPC_DB ()
-	if (type (AUCTIONATOR_NPC_PRICES) ~= "table") then AUCTIONATOR_NPC_PRICES = {}; end
-	return AUCTIONATOR_NPC_PRICES;
-end
-
--- Per-item NPC buy price for a learned trade good, or nil if we've never seen
--- it sold by a vendor.
-function Atr_GetNPCPrice (itemID)
-	itemID = tonumber (itemID);
-	if (itemID == nil or type (AUCTIONATOR_NPC_PRICES) ~= "table") then return nil; end
-	local p = AUCTIONATOR_NPC_PRICES[itemID];
-	if (type (p) == "number" and p > 0) then return p; end
-	return nil;
-end
-
--- Walk the open merchant and learn every unlimited-stock, gold-priced Trade
--- Goods item as an NPC-sold reagent.  Limited-stock or item/honor-cost slots
--- are skipped: an unlimited gold price is what makes a reagent "normally sold
--- by NPCs" and caps its real cost at the NPC price.
-function Atr_NPC_HarvestMerchant ()
-	if (type (GetMerchantNumItems) ~= "function" or type (GetMerchantItemInfo) ~= "function") then return; end
-	local total = GetMerchantNumItems () or 0;
-	if (total <= 0) then return; end
-
-	local db     = Atr_NPC_DB ();
-	local ItemID = (zc and zc.ItemIDfromLink) or nil;
-
-	for i = 1, total do
-		local _, _, price, quantity, numAvailable, _, _, extendedCost = GetMerchantItemInfo (i);
-		-- unlimited stock (numAvailable == -1), a real gold price, no item/token cost
-		if (price and price > 0 and not extendedCost and numAvailable == -1) then
-			local link   = GetMerchantItemLink and GetMerchantItemLink (i) or nil;
-			local itemID = link and ItemID and tonumber ((ItemID (link))) or nil;   -- extra parens: ItemID returns 3 values
-			if (itemID) then
-				local itemType = link and select (6, GetItemInfo (link)) or nil;
-				if (itemType == "Trade Goods") then
-					local q = tonumber (quantity) or 1;
-					if (q < 1) then q = 1; end
-					local unit = math.floor (price / q);
-					if (unit > 0) then db[itemID] = unit; end
-				end
-			end
-		end
-	end
-end
-
--- Learn NPC prices whenever a merchant window opens or refreshes.  A dedicated
--- frame keeps this off the core event dispatcher; guarded so the file still
--- loads under a bare Lua interpreter for testing.
-if (type (CreateFrame) == "function") then
-	local f = CreateFrame ("Frame");
-	f:RegisterEvent ("MERCHANT_SHOW");
-	f:RegisterEvent ("MERCHANT_UPDATE");
-	f:SetScript ("OnEvent", function () Atr_NPC_HarvestMerchant (); end);
-end
+-- Moved to AuctionatorFinderMerchant.lua, which now owns all merchant-window
+-- scanning (NPC trade-good prices AND Bazaar tokens) behind one debounced,
+-- session-throttled event frame so opening a vendor no longer re-walks the
+-- list on every MERCHANT_UPDATE.  Atr_NPC_DB / Atr_GetNPCPrice /
+-- Atr_NPC_HarvestMerchant stay global, so the tooltip code below still calls
+-- Atr_GetNPCPrice exactly as before.
 
 -----------------------------------------
 

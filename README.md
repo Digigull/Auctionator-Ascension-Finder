@@ -107,6 +107,33 @@ every sellable item by the **best way to sell it**:
 
 ---
 
+## Gentle merchant & profession learning
+
+The margins above lean on two things the addon learns quietly in the
+background: **NPC prices** (what vendors charge for reagents) and **crafting
+recipes** (read from profession windows). Both are learned the least
+aggressive way, so opening an NPC or a profession window doesn't stutter:
+
+- **Debounced** — the client refires `MERCHANT_UPDATE` /
+  `TRADE_SKILL_UPDATE` in a burst while item data streams in. Each harvest
+  waits for that storm to go quiet and then runs **once**, instead of
+  re-walking the whole list on every event.
+- **Scanned once per session** — each vendor and profession is fingerprinted
+  (who, how many items, first/last item) and skipped on re-open once it's been
+  fully read. A stale re-open costs a couple of item-link reads, not a full
+  walk. The ledger resets on `/reload` or relog, so a fresh login re-learns
+  once in case stock or your recipes changed.
+- **Cold-cache safe** — a list read before its item data finished arriving is
+  left unmarked, so the next quiet update fills the gaps rather than locking in
+  a partial scan.
+
+This lives in `AuctionatorFinderMerchant.lua` (NPC + Bazaar merchant scan),
+`AuctionatorFinderProfession.lua` (trade-skill scan — the home for future
+"most profitable recipe" filter/sort features), and the shared
+`AuctionatorFinderScanThrottle.lua` session ledger.
+
+---
+
 ## Bazaar tab — token ⇄ gold converter
 
 Ascension sells vanity and convenience goods for **Bazaar Tokens** (ordinary

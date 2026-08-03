@@ -39,6 +39,9 @@ AuctionatorFinderFullScan.lua
 AuctionatorFinderOptions.lua
 AuctionatorFinderBuyRedirect.lua
 AuctionatorBazaar.lua
+AuctionatorFinderScanThrottle.lua
+AuctionatorFinderProfession.lua
+AuctionatorFinderMerchant.lua
 
 AuctionatorConfig.xml
 
