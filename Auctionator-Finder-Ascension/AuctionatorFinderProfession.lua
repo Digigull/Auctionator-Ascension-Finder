@@ -139,6 +139,30 @@ function Atr_Craft_GetCraftCost(link, name)
     return math.floor(total / made);
 end
 
+-- True when we have a harvested recipe for this item at all, regardless of
+-- whether its reagents can be priced.  Atr_Craft_GetCraftCost returns nil both
+-- for "not a recipe" and for "a recipe with a reagent we can't price yet"; this
+-- lets a caller (the craft-cost tooltip) tell those apart and show a "cost
+-- unknown" hint for the craftable-but-unpriced case instead of staying silent.
+function Atr_Craft_HasRecipe(link, name)
+    if (AUCTIONATOR_CRAFT_RECIPES == nil) then return false; end
+
+    local itemID;
+    if (type(link) == "number") then
+        itemID = link;
+    elseif (link and zc and zc.ItemIDfromLink) then
+        itemID = tonumber((zc.ItemIDfromLink(link)));   -- extra parens: returns 3 values
+    end
+    if (itemID and AUCTIONATOR_CRAFT_RECIPES[itemID]) then return true; end
+
+    if (name == nil and link and type(link) ~= "number" and GetItemInfo) then
+        name = GetItemInfo(link);
+    end
+    if (name and AUCTIONATOR_CRAFT_RECIPES[name]) then return true; end
+
+    return false;
+end
+
 -- Split a tooltip line into reagent {name, count} pairs, or nil if the line is
 -- not a reagent list.  Recipe tooltips end with a line like
 -- "Frostweave Cloth (4), Infinite Dust (1)"; every comma-segment is
@@ -397,6 +421,9 @@ local gProfSort_Broken   = false;               -- a render error disables us fo
 local gProfSort_Order    = nil;                 -- cached ranked index list
 local gProfSort_Profit   = nil;                 -- cached index -> profit map
 local gProfSort_Sig      = nil;                 -- signature the cache was built for
+local gProfSort_InRemap  = false;               -- guards our own remap against re-entry
+local gProfSort_Suspend  = false;               -- true while expanding categories: skip the sort pass
+Atr_ProfSort_LastError   = nil;                 -- last remap error, for /atrprofsort diagnostics
 
 local function Atr_ProfSort_Enabled()
     return (AUCTIONATOR_FINDER_SETTINGS ~= nil) and (AUCTIONATOR_FINDER_SETTINGS.profSort == true);
@@ -478,31 +505,49 @@ end
 
 -- Expand every collapsed category so no recipe hides from the ranking.  Only
 -- called from the checkbox click (a safe context) and window-open, never from
--- inside the update wrapper, to avoid re-entrant expand storms.
+-- inside the remap.  Suspended so the burst of updates the expands trigger just
+-- redraw the stock list; the single ranked pass runs afterwards, from Refresh.
 local function Atr_ProfSort_ExpandAll()
     if (type(GetNumTradeSkills) ~= "function" or type(ExpandTradeSkillSubClass) ~= "function") then return; end
-    local n = GetNumTradeSkills() or 0;
-    for i = n, 1, -1 do   -- bottom-up: expanding header i only inserts rows after i
-        local _, skillType, _, isExpanded = GetTradeSkillInfo(i);
-        if (skillType == "header" and not isExpanded) then
-            ExpandTradeSkillSubClass(i);
+    gProfSort_Suspend = true;
+    pcall(function()
+        local n = GetNumTradeSkills() or 0;
+        for i = n, 1, -1 do   -- bottom-up: expanding header i only inserts rows after i
+            local _, skillType, _, isExpanded = GetTradeSkillInfo(i);
+            if (skillType == "header" and not isExpanded) then
+                ExpandTradeSkillSubClass(i);
+            end
         end
-    end
+    end);
+    gProfSort_Suspend = false;
 end
 
 -- TradeSkillFrame_Update wrapper: stock first (styles rows + the rest of the
 -- window), then our ranked rewrite of the list when the box is ticked.
+--
+-- Two guards keep it safe.  gProfSort_InRemap makes a nested call a complete
+-- no-op: our own FauxScrollFrame_Update can move the scrollbar, and SetValue
+-- fires the scroll handler SYNCHRONOUSLY, which re-enters TradeSkillFrame_Update
+-- mid-remap -- letting it run again would re-stock the rows we just sorted (or
+-- recurse without end).  gProfSort_Suspend lets the stock update run but skips
+-- the sort pass while we are expanding categories.
 local function Atr_ProfSort_Wrapper(...)
+    if (gProfSort_InRemap) then return; end   -- re-entry from our own scroll update: do nothing
     if (Atr_ProfSort_OrigUpdate) then Atr_ProfSort_OrigUpdate(...); end
+    if (gProfSort_Suspend) then return; end
     if (Atr_ProfSort_Enabled() and not gProfSort_Broken) then
-        local ok = pcall(Atr_ProfSort_Remap);
+        gProfSort_InRemap = true;
+        local ok, err = pcall(Atr_ProfSort_Remap);
+        gProfSort_InRemap = false;
         if (not ok) then
             gProfSort_Broken = true;
+            Atr_ProfSort_LastError = tostring(err);
             if (AUCTIONATOR_FINDER_SETTINGS) then AUCTIONATOR_FINDER_SETTINGS.profSort = false; end
             if (gProfSort_Check) then gProfSort_Check:SetChecked(nil); end
             if (Atr_ProfSort_OrigUpdate) then Atr_ProfSort_OrigUpdate(); end   -- redraw a clean stock list
             if (DEFAULT_CHAT_FRAME) then
-                DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Sort by Profit hit a snag on this UI and was turned off.");
+                DEFAULT_CHAT_FRAME:AddMessage("|cffffcc00Auctionator:|r Sort by Profit hit a snag and was turned off: |cffff8888"
+                    .. tostring(err) .. "|r  (type /atrprofsort to copy this)");
             end
         end
     end
@@ -570,5 +615,48 @@ if (type(CreateFrame) == "function") then
         gProfSort_Order, gProfSort_Profit, gProfSort_Sig = nil, nil, nil;   -- new window -> rebuild
         if (Atr_ProfSort_Enabled() and not gProfSort_Broken) then Atr_ProfSort_ExpandAll(); end
     end);
+end
+
+-- /atrprofsort : diagnostics for the profit sort.  Prints what the reorder can
+-- see on this client (the frame, scroll frame and list buttons it needs), the
+-- feature's state and the last error -- so a "hit a snag" report has something
+-- concrete behind it.  Copies to the clipboard when the client supports it.
+if (SlashCmdList) then
+    SLASH_ATRPROFSORT1 = "/atrprofsort";
+    SlashCmdList["ATRPROFSORT"] = function ()
+        local L = {};
+        local function add(s) L[#L + 1] = s; end
+
+        local btns = 0;
+        while (_G["TradeSkillSkill" .. (btns + 1)]) do btns = btns + 1; end
+
+        local open  = (type(GetNumTradeSkills) == "function") and (GetNumTradeSkills() or 0) or 0;
+        local order = (open > 0) and select(1, Atr_ProfSort_BuildOrder()) or {};
+        local _, profByIdx = Atr_ProfSort_BuildOrder();
+        local priced = 0;
+        if (profByIdx) then for _, p in pairs(profByIdx) do if (p ~= nil) then priced = priced + 1; end end end
+
+        add("Auctionator Sort by Profit -- diagnostics");
+        add("  TradeSkillFrame:        " .. (TradeSkillFrame and "present" or "MISSING"));
+        add("  TradeSkillFrame_Update: " .. (type(TradeSkillFrame_Update) == "function" and "present" or "MISSING"));
+        add("  hook installed:         " .. (Atr_ProfSort_OrigUpdate and "yes" or "no"));
+        add("  TradeSkillListScrollFrame: " .. (TradeSkillListScrollFrame and "present" or "MISSING"));
+        add("  list buttons found:     " .. btns .. " (TradeSkillSkill1..N)");
+        add("  TRADE_SKILLS_DISPLAYED: " .. tostring(TRADE_SKILLS_DISPLAYED));
+        add("  FauxScrollFrame_Update: " .. (type(FauxScrollFrame_Update) == "function" and "present" or "MISSING"));
+        add("  setting (profSort):     " .. tostring(AUCTIONATOR_FINDER_SETTINGS and AUCTIONATOR_FINDER_SETTINGS.profSort));
+        add("  disabled by error:      " .. (gProfSort_Broken and "yes" or "no"));
+        add("  open profession rows:   " .. open .. "  (recipes ranked: " .. #order .. ", priced: " .. priced .. ")");
+        add("  last error:             " .. (Atr_ProfSort_LastError or "(none)"));
+
+        local report = table.concat(L, "\n");
+        if (DEFAULT_CHAT_FRAME) then
+            for _, line in ipairs(L) do DEFAULT_CHAT_FRAME:AddMessage(line); end
+        end
+        if (type(CopyToClipboard) == "function") then
+            CopyToClipboard(report);
+            if (DEFAULT_CHAT_FRAME) then DEFAULT_CHAT_FRAME:AddMessage("|cff00ff00(copied to clipboard)|r"); end
+        end
+    end
 end
 -- PROFITABILITY SORT end -----------------------------------------------------

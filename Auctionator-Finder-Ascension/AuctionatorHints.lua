@@ -1784,26 +1784,43 @@ end
 function Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xstring)
 
 	if (tip == nil or link == nil) then return; end
-	if (AUCTIONATOR_A_TIPS ~= 1) then return; end			-- comparison needs the auction price
+	if (AUCTIONATOR_A_TIPS ~= 1) then return; end			-- crafting economics are auction info
 	if (type(Atr_Craft_GetCraftCost) ~= "function") then return; end
 
-	local craftCost = Atr_Craft_GetCraftCost (link, itemName);	-- per item, nil unless fully priceable
-	if (craftCost == nil or craftCost <= 0) then return; end
-
-	local sellPrice = (itemName and Atr_GetAuctionPrice) and tonumber (Atr_GetAuctionPrice (itemName)) or nil;
-	if (sellPrice == nil or sellPrice <= 0) then return; end	-- no market price to compare against yet
-
 	xstring = xstring or "";
+
+	local craftCost = Atr_Craft_GetCraftCost (link, itemName);	-- per item, nil unless fully priceable
+
+	-- No total?  Don't stay silent on something we KNOW is craftable -- that
+	-- reads as "no craft support" when the real cause is a reagent we can't
+	-- price yet (scan the AH, or visit the vendor that sells it).  For an item
+	-- that isn't a harvested recipe at all, add nothing.
+	if (craftCost == nil or craftCost <= 0) then
+		if (type(Atr_Craft_HasRecipe) == "function" and Atr_Craft_HasRecipe (link, itemName)) then
+			tip:AddDoubleLine (ZT("Craft cost")..xstring, "|cFFAAAAAA"..ZT("unknown").."|r");
+		end
+		return;
+	end
+
+	-- The produced item's own auction price -- needed only for the profit line,
+	-- NOT for the cost line.  Craft cost is worth showing on its own (it tells
+	-- you what a craft ties up), so we no longer bail when this is missing.
+	local sellPrice = (itemName and Atr_GetAuctionPrice) and tonumber (Atr_GetAuctionPrice (itemName)) or nil;
 
 	-- Match the stack scaling the rest of the tooltip used (see the Auction line).
 	if (num and showStackPrices) then
 		craftCost = craftCost * num;
-		sellPrice = sellPrice * num;
+		if (sellPrice) then sellPrice = sellPrice * num; end
+	end
+
+	tip:AddDoubleLine (ZT("Craft cost")..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (craftCost));
+
+	if (sellPrice == nil or sellPrice <= 0) then			-- cost known, market price not
+		tip:AddDoubleLine (ZT("Craft profit")..xstring, "|cFFAAAAAA"..ZT("unknown").."|r");
+		return;
 	end
 
 	local margin = sellPrice - craftCost;
-
-	tip:AddDoubleLine (ZT("Craft cost")..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (craftCost));
 	if (margin >= 0) then
 		tip:AddDoubleLine (ZT("Craft profit")..xstring, "|cFF44FF44"..zc.priceToMoneyString (margin).."|r");
 	else

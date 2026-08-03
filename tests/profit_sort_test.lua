@@ -165,4 +165,21 @@ gAuction = { ["A"] = 100, ["B"] = 100 }   -- both produced items priced, but rea
 order = Atr_ProfSort_BuildOrder ()
 ok (order[1] == 1 and order[2] == 2, "two unpriceable rows keep their original order (stable)")
 
+-- ---- Atr_Craft_HasRecipe: "craftable but unpriced" vs "not craftable" -------
+-- The craft-cost tooltip uses this to show a "cost unknown" hint instead of
+-- staying silent on a recipe whose reagents we can't price yet.
+
+ok (type (Atr_Craft_HasRecipe) == "function", "exports Atr_Craft_HasRecipe")
+
+AUCTIONATOR_CRAFT_RECIPES = {
+  [200]           = { made = 1, reagents = { { id = 301, count = 1 } } },   -- id-keyed (window harvest)
+  ["Frostweave Bag"] = { made = 1, reagents = { { name = "Bolt", count = 1 } } },   -- name-keyed (tooltip harvest)
+}
+ok (Atr_Craft_HasRecipe (200) == true,               "knows an id-keyed harvested recipe")
+ok (Atr_Craft_HasRecipe ("item:200") == true,        "resolves a link to its id-keyed recipe")
+ok (Atr_Craft_HasRecipe (nil, "Frostweave Bag") == true, "knows a name-keyed harvested recipe")
+ok (Atr_Craft_HasRecipe (999) == false,              "reports no recipe for an unknown item")
+AUCTIONATOR_CRAFT_RECIPES = nil
+ok (Atr_Craft_HasRecipe (200) == false,              "no recipe db -> no recipe")
+
 print ("\nALL PROFIT SORT TESTS PASSED (" .. pass .. " checks)")
