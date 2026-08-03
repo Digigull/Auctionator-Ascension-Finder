@@ -2677,46 +2677,16 @@ function Atr_Bz_HarvestMerchant ()
 end
 
 -------------------------------------------------------------------------------
--- events.  Created at load, not in Atr_Bz_Init, because the player can visit
--- Tiraxis without ever opening the auction house.  Guarded so the file still
--- loads under a bare Lua interpreter for testing.
+-- events.
+--
+-- The merchant-open harvest and the gossip-branch context hook used to live
+-- here.  They moved to AuctionatorFinderMerchant.lua, which now drives ALL
+-- merchant-window scanning (this Bazaar harvest and the NPC price learner)
+-- through one debounced, session-throttled event frame -- so opening a vendor
+-- no longer re-walks the list on every MERCHANT_UPDATE.  It calls the two
+-- globals defined above, Atr_Bz_HarvestMerchant and Atr_Bz_SetGossipContext,
+-- exactly as this frame did.
 -------------------------------------------------------------------------------
-
-if (CreateFrame) then
-
-	local bzf = CreateFrame ("Frame", "Atr_Bz_MerchantFrame", UIParent);
-
-	bzf:RegisterEvent ("MERCHANT_SHOW");
-	bzf:RegisterEvent ("GOSSIP_SHOW");
-
-	bzf:SetScript ("OnEvent", function (self, event)
-
-		if (event ~= "MERCHANT_SHOW") then return; end
-
-		-- the list can populate a frame or two after the event fires
-		local elapsed = 0;
-		self:SetScript ("OnUpdate", function (s, dt)
-			elapsed = elapsed + dt;
-			if (elapsed < 0.3) then return; end
-			s:SetScript ("OnUpdate", nil);
-
-			local n, cat = Atr_Bz_HarvestMerchant();
-			if (n > 0 and DEFAULT_CHAT_FRAME) then
-				DEFAULT_CHAT_FRAME:AddMessage (string.format (
-					"|cff44ddffAuctionator|r "..BZT("Bazaar: learned %d items%s"),
-					n, cat and (" ("..cat..")") or ""));
-			end
-		end);
-	end);
-
-	if (hooksecurefunc and type (SelectGossipOption) == "function") then
-		hooksecurefunc ("SelectGossipOption", function (index)
-			local btn = _G["GossipTitleButton"..tostring (index)];
-			local txt = btn and btn.GetText and btn:GetText();
-			if (txt) then Atr_Bz_SetGossipContext (txt); end
-		end);
-	end
-end
 
 -------------------------------------------------------------------------------
 -- PHASE 5a: live token price from the auction house.
