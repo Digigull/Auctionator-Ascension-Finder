@@ -33,6 +33,7 @@ AuctionatorAPI.lua
 AuctionatorConfig.lua
 AuctionatorBuy.lua
 AuctionatorFinder.lua
+AuctionatorFinderPriceDB.lua
 AuctionatorBazaar.lua
 
 AuctionatorConfig.xml
