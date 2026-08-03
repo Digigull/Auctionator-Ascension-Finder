@@ -179,7 +179,6 @@ optimistic sticker price.
 | Path | Contents |
 | --- | --- |
 | `Auctionator-Finder-Ascension/` | The addon: `.toc`, Lua modules, XML frames, `Locales/`, `Images/`. |
-| `Auctionator_Finder_Debug/` | Optional stub addon for opt-in last-scan debug dumps. |
 | `Old Docs/` | Architecture, client, and testing notes. |
 
 ---
@@ -190,12 +189,10 @@ optimistic sticker price.
    keeping the folder structure intact. See
    [`README-SHARING.txt`](Auctionator-Finder-Ascension/README-SHARING.txt)
    for the full list of folders to package for distribution.
-2. (Optional) Copy `Auctionator_Finder_Debug/` as well — without it the
-   Debug checkbox is simply a no-op.
-3. Fully restart the client. In the AddOns list, **"Allow Non-Launcher
+2. Fully restart the client. In the AddOns list, **"Allow Non-Launcher
    AddOns"** must be enabled (default for anyone already using
    non-launcher addons).
-4. Open the auction house and select the **Finder** tab.
+3. Open the auction house and select the **Finder** tab.
 
 > **Note:** WowUp does not support Ascension. Distribution goes through the
 > Ascension launcher's Addons tab (fed from the Ascension-Addons GitHub

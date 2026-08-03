@@ -284,10 +284,11 @@ after `AuctionatorScan.lua`, so the later definition wins and neither
 ## Settings & saved data
 - `AUCTIONATOR_FINDER_SETTINGS` (main toc): ignoreLargeWarn, autoCompare,
   dressHover, reqOnly, feedPriceDB, fullScanCats (class index → bool, as
-  string keys). Checkboxes mirror it; Debug is deliberately session-only.
-- `AUCTIONATOR_FINDER_DEBUG` (stub addon): opt-in last-scan dump
-  (names/links/quality/ilvl/level/count/buyout/stats), cap 3000 — the tool
-  that produced most Ascension findings.
+  string keys). Checkboxes mirror it.
+- `AUCTIONATOR_FINDER_DEBUG` (opt-in last-scan dump) and its
+  `Auctionator_Finder_Debug/` stub addon produced most Ascension findings but
+  were **removed** once the vendor-price investigation closed — see
+  `VENDOR-RESEARCH-CLEANUP-PLAN.md`.
 
 ## Hover extras
 - Compare (autoCompare): `GameTooltip_ShowCompareItem` on gear hover.

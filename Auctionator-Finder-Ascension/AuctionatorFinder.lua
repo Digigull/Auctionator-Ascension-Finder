@@ -1072,7 +1072,8 @@ function Fdr_AHVariant_Record (rec)
 	if (type (rec) ~= "table" or not Atr_AHVariant_Note) then return false; end
 	if (not (rec.scaled and rec.equippable)) then return false; end
 
-	local itemID = Fdr_ResearchItemID (rec.link);
+	local link   = rec.link;
+	local itemID = link and tonumber (link:match ("|Hitem:(%d+)") or link:match ("^item:(%d+)"));
 	local ilvl   = tonumber (rec.trueIlvl or 0) or 0;
 	local req    = tonumber (rec.level or 0) or 0;
 	if (not itemID or ilvl <= 0 or req <= 0) then return false; end
@@ -2761,12 +2762,9 @@ local function Fdr_FinishSearch (note)
 	Fdr_UpdateHeaderArrows ();
 	Fdr_SortAndRedisplay ();
 
-	Fdr_Research_Absorb ();		-- research ledger: always on, tiny, and useless if it only runs when a checkbox happens to be ticked
-	Fdr_SaveDebugDump ();
-
 	-- FINDER_TAB: full-scan driver hook.  Deliberately LAST, so the price
-	-- feed and the research ledger have both already consumed this
-	-- category's rows and the driver is free to throw them away.
+	-- feed has already consumed this category's rows and the driver is free
+	-- to throw them away.
 	if (gFdr_OnFinish) then
 		gFdr_OnFinish (pAdd or 0, pUpd or 0, pSkip or 0, pWhy);
 	end
@@ -2795,86 +2793,6 @@ addonTable.Finder.GetCapHit   = function () return gFdr_CapHit;  end;	-- was the
 addonTable.Finder.Redir       = gFdr_Redir;				-- Buy<->Finder redirect table (shared by ref, never reassigned)
 addonTable.Finder.GetState    = function () return gFdr_State; end;	-- live scan state-machine value
 addonTable.Finder.State_NULL  = FDR_NULL;					-- the idle scan state
-
--- ===========================================================================
--- FINDER_TAB: research targets  ->  moved to AuctionatorFinderResearch.lua
---
--- The vendor-price research ledger, its ranking, and the /atrtarget command
--- now live in their own file, loaded after this one. It exports the same
--- Fdr_Research_* / Fdr_ResearchItemID globals the scan engine above calls at
--- runtime, and reads live scan results back through addonTable.Finder.GetResults.
--- ===========================================================================
-
-
--- Research capture toggle.  Was a session-only checkbox on the Finder tab;
--- it is a setting now (Interface > AddOns > Auctionator > Scanning), so it
--- persists.  Default OFF: the dump is an upload channel, not a feature.
-function Fdr_ResearchDump_Enabled ()
-
-	if (AUCTIONATOR_FINDER_SETTINGS == nil) then return false; end
-	return (AUCTIONATOR_FINDER_SETTINGS.researchDump == true);		-- default OFF
-end
-
-
--- Stores the raw scan into a SavedVariable (AUCTIONATOR_FINDER_DEBUG) so the
--- links and stats can be analyzed outside the game. Written to disk on
--- /reload or logout. Capped to keep the file reasonable.
-function Fdr_SaveDebugDump ()
-
-	if (not Fdr_ResearchDump_Enabled ()) then
-		return;
-	end
-
-	local dump = {};
-	dump.when	= time();
-	dump.search	= gFdr_SearchText;
-	dump.items	= {};
-
-	local cap = 3000;
-
-	local i;
-	for i = 1, math.min (#gFdr_Results, cap) do
-
-		local rec = gFdr_Results[i];
-
-		local e = {};
-		e.n		= rec.name;
-		e.l		= rec.link;
-		e.q		= rec.quality;
-		e.il	= rec.ilvl;
-		e.lv	= rec.level;
-		e.c		= rec.count;
-		e.b		= rec.buyoutPrice;
-
-		if (rec.equippable) then
-			e.eq = 1;
-			local stats = Fdr_GetStats (rec);
-			if (next (stats)) then
-				e.s = {};
-				for k, v in pairs (stats) do e.s[k] = v; end
-			end
-		end
-
-		tinsert (dump.items, e);
-	end
-
-	-- HIJACKED (2026-07): the dump is now the research upload channel too.
-	-- The raw rows are one scan; the targets are the whole accumulated ledger,
-	-- ranked, so the uploaded file answers "what should I go buy" offline.
-	dump.targets = {};
-	local t = Fdr_Research_Targets (25);
-	for i = 1, #t do
-		local e = t[i];
-		tinsert (dump.targets, { id = e.id, n = e.name, score = e.score,
-								 cost = e.cost, costRq = e.costRq,
-								 unmapped = e.unmapped, variants = e.variants,
-								 down = e.down, rungs = e.rungs,
-								 seen = e.seen, scans = e.scans, spread = e.spread,
-								 want = Fdr_Research_Wants (e) });
-	end
-
-	AUCTIONATOR_FINDER_DEBUG = dump;
-end
 
 local function Fdr_NextSpecOrFinish ()
 
@@ -4076,7 +3994,7 @@ function Atr_Finder_Init ()
 	clearBtn:SetText (FT("Clear"));
 	clearBtn:SetScript ("OnClick", Atr_Finder_ClearFilters);
 
-	-- persisted settings (stored by the Auctionator_Finder_Debug stub addon)
+	-- persisted settings (AUCTIONATOR_FINDER_SETTINGS in the addon's SavedVariables)
 	AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
 
 	-- toolbar toggle for the large-search warning, next to Clear

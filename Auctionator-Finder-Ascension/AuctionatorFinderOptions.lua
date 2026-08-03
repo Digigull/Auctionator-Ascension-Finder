@@ -22,11 +22,10 @@ local gFdr_Redir = F and F.Redir;
 -- ===========================================================================
 -- FINDER_TAB begin: scanning options rows
 --
--- Two Finder settings live in Interface > AddOns > Auctionator > Scanning,
--- under the quality floor that governs the same price feed:
+-- The Finder's price-feed setting lives in Interface > AddOns > Auctionator >
+-- Scanning, under the quality floor that governs the same price feed:
 --   * Prices   - AUCTIONATOR_FINDER_SETTINGS.feedPriceDB   (default ON)
---   * Research - AUCTIONATOR_FINDER_SETTINGS.researchDump  (default OFF)
--- Both were checkboxes on the Finder tab's bottom strip until 2026-07.
+-- It was a checkbox on the Finder tab's bottom strip until 2026-07.
 --
 -- TWO TRAPS, both specific to Auctionator's options plumbing:
 --   1. Atr_LoadOptionsSubPanel copies the save function into f.okay BY VALUE
@@ -41,8 +40,8 @@ local gFdr_Redir = F and F.Redir;
 --      first Okay writes whatever an uninitialised checkbox happened to say.
 --
 -- Everything is guarded: a build without this panel degrades to "no rows",
--- never to an error, and /atrprices on|off and /atrresearch on|off remain as
--- the fallback path to the same two settings.
+-- never to an error, and /atrprices on|off remains as the fallback path to
+-- the price-feed setting.
 -- ===========================================================================
 
 local gFdr_OptRows = nil;
@@ -99,14 +98,7 @@ function Fdr_Options_Ensure ()
 		FT("Update Auctionator prices"),
 		{ FT("Feeds this scan's lowest buyouts into Auctionator's own price database, so the Buy and Sell tabs stay current without a Full Scan. Scaled gear is excluded (that database is keyed by name, which cannot tell scaled variants apart) and nothing is ever deleted. Skipped entirely when a scan hits the result cap, because a truncated scan's lowest prices are too high.") });
 
-	gFdr_OptRows.research = row ("Atr_Finder_Opt_Research_CB", -160,
-		FT("Save Finder research data for upload"),
-		FT("Research capture"),
-		{ FT("When checked, each completed scan's item data (names, links, stats, prices) is saved to:"),
-		  { "SavedVariables\\Auctionator_Finder_Debug.lua", 0.5, 0.8, 1.0 },
-		  FT("Writes the last scan's raw rows AND the ranked vendor-price research targets for offline analysis. The target ledger itself is always collected - this only controls the upload file. Written on /reload or logout; requires the Auctionator_Finder_Debug addon folder. In game use /atrtarget.") });
-
-	gFdr_OptRows.gearjump = row ("Atr_Finder_Opt_GearJump_CB", -186,
+	gFdr_OptRows.gearjump = row ("Atr_Finder_Opt_GearJump_CB", -160,
 		FT("Open weapons and armor on the Finder tab"),
 		FT("Gear opens on the Finder tab"),
 		{ FT("Picking a weapon or a piece of armor on the Buy tab searches it here instead. The Buy tab groups a scan by item name and shows one cached version for all of it, which on this realm can be a different item than the one you buy; this tab reads each listing's own required level and verifies its real item level. Everything that is not gear still opens on the Buy tab. Searching the same item a second time stays there."),
@@ -124,7 +116,6 @@ function Fdr_Options_Sync ()
 	if (r == nil) then return; end
 
 	r.prices:SetChecked (Fdr_PriceDB_Enabled () and true or nil);
-	r.research:SetChecked (Fdr_ResearchDump_Enabled () and true or nil);
 	r.gearjump:SetChecked (Fdr_BuyRedirect_Enabled () and true or nil);
 end
 
@@ -137,7 +128,6 @@ function Fdr_Options_Apply ()
 
 	AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
 	AUCTIONATOR_FINDER_SETTINGS.feedPriceDB   = gFdr_OptRows.prices:GetChecked() and true or false;
-	AUCTIONATOR_FINDER_SETTINGS.researchDump  = gFdr_OptRows.research:GetChecked() and true or false;
 	AUCTIONATOR_FINDER_SETTINGS.gearToFinder  = gFdr_OptRows.gearjump:GetChecked() and true or false;
 end
 
@@ -172,26 +162,9 @@ function Fdr_Options_Init ()
 end
 
 
--- Chat fallback for both settings, and the only route on a build whose
+-- Chat fallback for the toggles, and the only route on a build whose
 -- Scanning panel we could not find.  /atrprices carries the price feed's.
 if (SlashCmdList) then
-	SLASH_ATRRESEARCHDUMP1 = "/atrresearch";
-	SlashCmdList["ATRRESEARCHDUMP"] = function (msg)
-
-		local arg = tostring (msg or ""):lower():match ("%a+");
-		if (arg == "on" or arg == "off") then
-			AUCTIONATOR_FINDER_SETTINGS = AUCTIONATOR_FINDER_SETTINGS or {};
-			AUCTIONATOR_FINDER_SETTINGS.researchDump = (arg == "on");
-			Fdr_Options_Sync ();
-		end
-
-		local s = "Finder research capture: "..(Fdr_ResearchDump_Enabled () and
-					"|cff40ff40ON|r - dumps written on /reload" or
-					"|cffff4040OFF|r (Auctionator options > Scanning)");
-		if (zc and zc.msg_atr) then zc.msg_atr (s);
-		elseif (DEFAULT_CHAT_FRAME) then DEFAULT_CHAT_FRAME:AddMessage (s); end
-	end
-
 	SLASH_ATRVARIANTDB1 = "/atrahdb";
 	SlashCmdList["ATRVARIANTDB"] = function (msg)
 

@@ -7,10 +7,12 @@ browser, mean-price DB, texture-based name disambiguation hack).
 ## Addon layout / SavedVariables pattern
 - Main folder `Auctionator/` plus **stub addons** that exist only to route
   SavedVariables into their own files on disk:
-  `Auctionator_Price_Database/`, `Auctionator_Pricing_History/` (originals),
-  and our `Auctionator_Finder_Debug/`. A stub is just a one-line `.toc`
-  with a `## SavedVariables:` line; each variable must be declared by
-  exactly ONE addon. Files land in `WTF/Account/<acct>/SavedVariables/`.
+  `Auctionator_Price_Database/`, `Auctionator_Pricing_History/` (originals).
+  A stub is just a one-line `.toc` with a `## SavedVariables:` line; each
+  variable must be declared by exactly ONE addon. Files land in
+  `WTF/Account/<acct>/SavedVariables/`. (Our `Auctionator_Finder_Debug/` stub
+  followed this pattern but was removed with the vendor-price research
+  scaffolding — see `VENDOR-RESEARCH-CLEANUP-PLAN.md`.)
 - Main toc SavedVariables include the price DB, shopping lists, etc., and
   (our addition) `AUCTIONATOR_FINDER_SETTINGS`.
 

@@ -1,3 +1,8 @@
+> **ARCHIVED (2026-08).** Completed research journal. The investigation is
+> closed and its scaffolding removed (see `../VENDOR-RESEARCH-CLEANUP-PLAN.md`).
+> The single living spec is `../VENDOR-PRICE.md`; this file is kept only as the
+> evidence trail. Do not treat anything here as current behaviour.
+
 # Vendor Price Research: Ascension per-instance scaling formula
 
 Goal: derive the server's formula for the vendor sell price of scaled item

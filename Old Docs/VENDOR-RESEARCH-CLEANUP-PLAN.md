@@ -1,13 +1,29 @@
 # Vendor research cleanup plan — retire the formula-discovery scaffolding
 
-**Status: PROPOSED (2026-08).** Self-contained execution plan. Read it top to
-bottom before touching code. It removes the machinery that existed only to
+**Status: DONE — Phases 0–3 (2026-08). Phase 4 GATED on the seed verdict.**
+Self-contained execution plan. It removes the machinery that existed only to
 *discover* the Ascension vendor-price formula, now that pricing is solved by the
 shipped confirmed-price seed table (`VENDOR-SEED-PLAN.md`). It does **not** touch
 the live prediction path, and it deliberately keeps one piece of "research"
 instrumentation — the `.log` recorder — until the seed experiment returns its
-verdict. Confirm every line number before editing; they were accurate at writing
-but the files move.
+verdict.
+
+**What shipped (Phases 0–3):**
+- Phase 0 — inlined the `Fdr_ResearchItemID` link→itemID helper at the scan
+  engine's AH-variant call site, de-coupling it from the ledger (pure refactor).
+- Phase 1 — deleted the research target ledger (`AuctionatorFinderResearch.lua`,
+  `/atrtarget`, `AUCTIONATOR_FINDER_RESEARCH`, `Fdr_Research_Absorb`) and its
+  tests (`ledger_relevance_test.lua` and the split-load/leak-audit references).
+- Phase 2 — removed the debug/upload channel entirely: `Fdr_SaveDebugDump`,
+  `Fdr_ResearchDump_Enabled`, `AUCTIONATOR_FINDER_DEBUG`, the `researchDump`
+  setting, the "Research capture" options row, `/atrresearch`, and the
+  `Auctionator_Finder_Debug/` stub addon.
+- Phase 3 — archived the research journal to `archive/VENDOR-PRICE-RESEARCH.md`,
+  and dropped the `/atrtarget` / research-capture references from
+  `VENDOR-PRICE.md`, `README.md`, and `README-SHARING.txt`.
+
+The predictor (`AuctionatorHints.lua`) was not touched, so no live prediction
+changed. The full `tests/` sweep is green.
 
 ## Why (one paragraph)
 
@@ -89,13 +105,13 @@ repoint line 1075. Then the research file has no remaining live caller.
 
 ## Phases (each ends green: `luac5.1 -p` + full `tests/` sweep)
 
-### Phase 0 — inline the shared helper (no behaviour change)
+### Phase 0 — inline the shared helper (no behaviour change) — DONE
 Inline `Fdr_ResearchItemID` per above; repoint `AuctionatorFinder.lua:1075`.
 Verify: AH-variant recording still derives the same itemID (extend or eyeball
 `finder_split_load_test.lua`). This phase alone must leave `/atrtarget` still
 working — it is a pure refactor that de-couples the engine from the ledger.
 
-### Phase 1 — remove the research target ledger
+### Phase 1 — remove the research target ledger — DONE
 - Delete `AuctionatorFinderResearch.lua`; drop `.toc:37` and the
   `AUCTIONATOR_FINDER_RESEARCH` name from `.toc:9`.
 - Remove `Fdr_Research_Absorb()` at `AuctionatorFinder.lua:2764` and the
@@ -111,7 +127,7 @@ working — it is a pure refactor that de-couples the engine from the ledger.
 - Grep for stragglers: `Fdr_Research`, `atrtarget`, `researchDump`,
   `AUCTIONATOR_FINDER_RESEARCH` must return nothing but comments you also clean.
 
-### Phase 2 — retire the debug/upload channel (optional, low-priority)
+### Phase 2 — retire the debug/upload channel — DONE (removed in full)
 `Auctionator_Finder_Debug/` is self-labelled "Safe to delete" and default OFF.
 With the ledger gone its only remaining job is the raw-scan dump. If nothing
 still needs offline raw scans, delete the folder and `Fdr_SaveDebugDump` /
@@ -120,7 +136,7 @@ the research-target portion (already done in Phase 1). Note the seed measurement
 does **not** use this channel — it reads `AUCTIONATOR_VENDOR_LEARNED.log`
 directly — so removing it does not affect the seed experiment.
 
-### Phase 3 — docs
+### Phase 3 — docs — DONE
 - Archive `VENDOR-PRICE-RESEARCH.md`: it is a completed journal. Either move it
   under an `Old Docs/archive/` marker or trim it to the handful of still-true
   conclusions (the model, the "What NOT to do" list, the SavedVariables field

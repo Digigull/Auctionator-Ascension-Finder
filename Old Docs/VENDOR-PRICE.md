@@ -187,15 +187,15 @@ diagnostics can.** Use `/atrvp` first, always.
 - **The shape rests on n=4 ladders.** It will move if more are measured. That is
   a reason to leave it alone, not to remeasure it.
 
-## Still running, now optional
+## Research scaffolding — removed
 
 The **research-target ledger** (`AUCTIONATOR_FINDER_RESEARCH`, `/atrtarget`,
-`/atrresearch on|off`) absorbs and ranks candidate purchases on every scan. It
-was built to feed this investigation. With the investigation closed it is doing
-per-scan work and growing SavedVariables for no live purpose.
-
-Leave it on only if you want the shopping list. Otherwise `/atrresearch off`.
-The calibration recorder is separate and should stay on regardless.
+`/atrresearch on|off`) and its debug/upload channel (`Auctionator_Finder_Debug/`,
+`AUCTIONATOR_FINDER_DEBUG`) were built to feed this investigation. With the
+investigation closed and pricing solved by the confirmed-price seed table, they
+did per-scan work and grew SavedVariables for no live purpose, so they were
+removed (see `VENDOR-RESEARCH-CLEANUP-PLAN.md`). The calibration recorder
+(`db.log`, `/atrvp`) is separate and stays on to measure the seed experiment.
 
 ## If you reopen this
 
