@@ -1789,14 +1789,30 @@ function Atr_AddCraftProfitToTip (tip, link, itemName, num, showStackPrices, xst
 
 	xstring = xstring or "";
 
-	local craftCost = Atr_Craft_GetCraftCost (link, itemName);	-- per item, nil unless fully priceable
+	local craftCost = Atr_Craft_GetCraftCost (link, itemName);	-- per item, from the background-harvested recipe DB
+
+	-- Fall back to a LIVE read of the open profession window.  On the Ascension
+	-- client the harvest into the recipe DB can miss recipes (reagent item links
+	-- come back nil), so the harvested cost above is often absent even while the
+	-- window is open in front of you -- but the live window has the data.  This
+	-- also tells us the recipe EXISTS (isCraftable) even when a reagent can't be
+	-- priced, so we can say "cost unknown" instead of nothing.
+	local isCraftable = false;
+	if ((craftCost == nil or craftCost <= 0) and type(Atr_Craft_LiveCostForItem) == "function") then
+		local liveCost, found = Atr_Craft_LiveCostForItem (link, itemName);
+		if (liveCost and liveCost > 0) then craftCost = liveCost; end
+		if (found) then isCraftable = true; end
+	end
+	if (not isCraftable and type(Atr_Craft_HasRecipe) == "function" and Atr_Craft_HasRecipe (link, itemName)) then
+		isCraftable = true;
+	end
 
 	-- No total?  Don't stay silent on something we KNOW is craftable -- that
 	-- reads as "no craft support" when the real cause is a reagent we can't
 	-- price yet (scan the AH, or visit the vendor that sells it).  For an item
-	-- that isn't a harvested recipe at all, add nothing.
+	-- that isn't a recipe at all, add nothing.
 	if (craftCost == nil or craftCost <= 0) then
-		if (type(Atr_Craft_HasRecipe) == "function" and Atr_Craft_HasRecipe (link, itemName)) then
+		if (isCraftable) then
 			tip:AddDoubleLine (ZT("Craft cost")..xstring, "|cFFAAAAAA"..ZT("unknown").."|r");
 		end
 		return;
