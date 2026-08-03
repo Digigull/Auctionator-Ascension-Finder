@@ -1,8 +1,12 @@
 # Vendor seed plan — ship confirmed prices, measure the payoff (option C)
 
-**Status: IN PROGRESS (2026-08).** Self-contained execution plan. You do not
-need the analysis conversation or the source dump to finish this — everything
-needed is in the repo. Read this top to bottom before touching code.
+**Status: CODE INTEGRATION DONE (2026-08).** Steps 1–5 are shipped in
+`AuctionatorHints.lua` + the `.toc`, verified by `tests/vendor_seed_test.lua`
+(extracts the FINDER_TAB blocks verbatim, drives login-merge and a confirmed
+sale). What remains is the *field* measurement — reading `pt == "seed"` from
+another player's dump (see "How success is measured"); that is the one part
+this repo cannot do offline. Self-contained execution plan; everything needed
+to build/verify is in the repo. Read this top to bottom before touching code.
 
 ## Why (one paragraph)
 
@@ -33,10 +37,13 @@ server-deterministic (`base × multiplier`, both server properties), so a confir
    are meaningless (or wrong) on another client. The file parses under
    `luac5.1 -p` and is ~35 KB.
 
-## What is left (the code integration)
+## The code integration (DONE — steps below are the as-shipped record)
 
-Three edits in `AuctionatorHints.lua` plus one `.toc` line. All the anchors below
-were accurate as of this writing; confirm line numbers before editing.
+Edits in `AuctionatorHints.lua` plus one `.toc` line, all landed. Step 4
+(tooltip provenance) shipped too: a seed-sourced obs hit renders `~*` where a
+real confirmed sale renders `*`. Coverage lives in `tests/vendor_seed_test.lua`.
+The anchors below were accurate as of writing; confirm line numbers before any
+future edit.
 
 ### Step 1 — load the seed file (`.toc`)
 

@@ -1288,11 +1288,29 @@ if (SlashCmdList) then
 		local db = Atr_VendorLearnedDB();
 		local id = tonumber (msg:match ("item:(%d+)") or msg:match ("^%s*(%d+)"));
 		if (id == nil) then
-			local nobs, nbase, ncb = 0, 0, 0;
-			for _ in pairs (db.obs)  do nobs  = nobs  + 1; end;
+			local nobs, nbase, ncb, nseed = 0, 0, 0, 0;
+			for _, o in pairs (db.obs)  do nobs  = nobs  + 1; if (o.seed and (o.n or 0) == 0) then nseed = nseed + 1; end; end;
 			for _ in pairs (db.base) do nbase = nbase + 1; end;
 			for _ in pairs (db.cb)   do ncb   = ncb   + 1; end;
 			zc.msg_atr ("vendor-predict build "..ATR_VP_BUILD.."  |  obs "..nobs.."  base "..nbase.."  sighted items "..ncb);
+			-- Seed readout: how many shipped prices are still untested here, how
+			-- many have been field-confirmed by a real sale (pt=="seed" log rows),
+			-- and how far those confirmed sales landed from the shipped guess -
+			-- the live measure of whether the shared table holds cross-player.
+			local npromoted, serr = 0, {};
+			for _, s in pairs (db.log or {}) do
+				if (s.pt == "seed") then
+					npromoted = npromoted + 1;
+					if (s.p and s.p > 0 and s.pp) then serr[#serr + 1] = math.abs (s.p - s.pp) / s.p; end;
+				end
+			end
+			local smed = "-";
+			if (#serr > 0) then
+				table.sort (serr);
+				local m = (#serr % 2 == 0) and ((serr[#serr/2] + serr[#serr/2 + 1]) / 2) or serr[math.ceil (#serr/2)];
+				smed = string.format ("%.1f%%", m * 100);
+			end
+			zc.msg_atr ("seed v"..tostring(db.seedver).."  |  "..nseed.." pending  "..npromoted.." field-tested  median err "..smed);
 			zc.msg_atr ("usage: /atrvp <itemID or shift-clicked link> [il rq]");
 			return;
 		end
@@ -1392,18 +1410,22 @@ local function Atr_VendorRecordSale (ps, bprice, bqty)
 		-- records which tier answered so repeat sales (pt="learned") can be
 		-- excluded from accuracy stats.
 		local pp, pwhy, pest = Atr_VendorPredict_Get (ps.itemID, ps.ilvl, ps.req);
+		local key     = ps.itemID..":"..ps.ilvl..":"..ps.req;
+		local prior   = db.obs[key];
+		local wasSeed = prior and prior.seed and (prior.n or 0) == 0;		-- seed-only, never really sold on this client
 		local pt;
 		if (pp == nil) then					pt = "none";
 		elseif (pest) then					pt = "est";
+		elseif (wasSeed) then					pt = "seed";		-- out-of-sample vs the shipped table: the number worth measuring
 		elseif (Atr_VendorLearned_Get and Atr_VendorLearned_Get (ps.itemID, ps.ilvl, ps.req)) then pt = "learned";
 		elseif (pwhy and pwhy:find ("interpolated")) then pt = "interp";
 		else								pt = "plateau"; end
 
-		local key = ps.itemID..":"..ps.ilvl..":"..ps.req;
 		local rec = db.obs[key];
 		if (rec == nil) then rec = { n = 0 }; db.obs[key] = rec; end;
 		rec.p = unit;
 		rec.n = rec.n + 1;
+		rec.seed = nil;					-- promoted: a real sale outranks the shipped guess
 		local smp = { id=ps.itemID, il=ps.ilvl, rq=ps.req, bil=ps.baseIlvl, brq=ps.baseReq, bp=ps.basePrice, qual=ps.qual, cls=ps.cls, sub=ps.sub, slot=ps.slot, p=rec.p, q=ps.count };
 		smp.pp = pp; smp.pt = pt;		-- what the predictor said, and which tier said it
 
@@ -1443,8 +1465,43 @@ local function Atr_VendorRecordSale (ps, bprice, bqty)
 	end
 end
 
+-- Seed fresh installs with the shipped confirmed-price table
+-- (AuctionatorVendorSeed.lua -> ATR_VENDOR_SEED).  Non-destructive: a real
+-- observation (seed flag absent, or n > 0) is NEVER touched; a seed-only entry
+-- (n == 0, seed == 1) may be refreshed when the shipped table's version bumps.
+-- Prices are server-deterministic (base x multiplier, both server properties),
+-- so a confirmed (itemID:ilvl:req) price is a global fact, valid for every
+-- player.  Idempotent - safe to run every login.
+local function Atr_VendorSeed_Merge ()
+	if (type(ATR_VENDOR_SEED) ~= "table") then return; end;
+	local db  = Atr_VendorLearnedDB();
+	local ver = (ATR_VENDOR_SEED.meta and ATR_VENDOR_SEED.meta.built) or "?";
+	local prev = db.seedver;						-- last applied seed version
+	for k, p in pairs (ATR_VENDOR_SEED.obs or {}) do
+		if (type(p) == "number" and p > 0) then
+			local rec = db.obs[k];
+			if (rec == nil) then
+				db.obs[k] = { p = p, n = 0, seed = 1 };			-- fresh seed
+			elseif (rec.seed and (rec.n or 0) == 0 and prev ~= ver) then
+				rec.p = p;								-- refresh seed-only entry on version bump
+			end
+			-- rec with seed==nil or n>0 is a real observation: leave it.
+		end
+	end
+	for id, r in pairs (ATR_VENDOR_SEED.base or {}) do
+		if (type(r) == "table" and r.p and r.p > 0) then
+			local b = db.base[id];
+			if (b == nil or (b.seed and (b.n or 0) <= 1 and prev ~= ver)) then
+				db.base[id] = { p = r.p, il = r.il or 0, rq = r.rq or 0, n = 1, seed = 1 };
+			end
+			-- a real base fact (seed==nil, majority-voted) is left untouched.
+		end
+	end
+	db.seedver = ver;
+end
+
 local function Atr_VendorLearn_OnEvent (self, event)
-	if (event == "PLAYER_LOGIN") then Atr_SaleMsg_Init(); return; end;
+	if (event == "PLAYER_LOGIN") then Atr_SaleMsg_Init(); Atr_VendorSeed_Merge(); return; end;
 	if (event == "MERCHANT_CLOSED") then gVendorPendingSales = {}; return; end;
 	local q = gVendorPendingSales;
 	if (#q == 0) then return; end;
@@ -1917,12 +1974,15 @@ local function ShowTipWithPricing (tip, link, num)
 		Atr_VendorCB_Note (itemID, itemVendorPrice, itemLevel, itemMinLevel, not scaleMismatch);
 	end
 	local vendorLearned = false;		-- FINDER_TAB: real price observed at a merchant for this exact scale-variant
+	local vendorSeeded  = false;		-- FINDER_TAB: obs hit that is a shipped seed guess, not the user's own confirmed sale (rendered '~*')
 	local vendorPredicted = false;		-- FINDER_TAB: gated formula estimate for an unsold variant (see VENDOR-PRICE-RESEARCH.md)
 	local vendorEstimate  = false;		-- FINDER_TAB: stage-4 cross-item shape estimate - the weakest tier, rendered '~... (est)'
 	if (scaleMismatch and AUCTIONATOR_V_TIPS == 1 and itemID and tipIlvl) then
 		local learned = Atr_VendorLearned_Get (itemID, tipIlvl, tipReq);
 		if (learned) then
 			vendorPrice = learned; vendorLearned = true;
+			local lrec = Atr_VendorLearnedDB().obs[itemID..":"..(tipIlvl or 0)..":"..(tipReq or 0)];
+			vendorSeeded = (lrec and lrec.seed and (lrec.n or 0) == 0) and true or false;		-- shipped guess: never really sold on this client
 		else
 			local predicted, _, isEstimate = Atr_VendorPredict_Get (itemID, tipIlvl, tipReq);
 			if (predicted) then
@@ -2034,6 +2094,8 @@ local function ShowTipWithPricing (tip, link, num)
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Vendor"), vendorShown, bestPrice)..xstring, "|cFFBBBBBB~|r|cFFDDDDDD"..zc.priceToMoneyString (vendorPrice).."|r|cFFAAAAAA (est)|r");
 		elseif (vendorPredicted) then		-- FINDER_TAB: gated estimate - labeled, never '*'
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Predicted vendor"), vendorShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (vendorPrice));
+		elseif (vendorSeeded) then		-- FINDER_TAB: '~*' = shipped seed price (server-deterministic guess), not a sale you made
+			tip:AddDoubleLine (Atr_TipLabel (ZT("Vendor"), vendorShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (vendorPrice).."|cFFAAAAFF~*|r");
 		elseif (vendorLearned) then		-- FINDER_TAB: '*' = learned from a real sale of this variant
 			tip:AddDoubleLine (Atr_TipLabel (ZT("Vendor"), vendorShown, bestPrice)..xstring, "|cFFFFFFFF"..zc.priceToMoneyString (vendorPrice).."|cFFAAAAFF*|r");
 		else
