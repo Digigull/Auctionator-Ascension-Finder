@@ -64,11 +64,17 @@ function Atr_Craft_Harvest()
                     local reagents = {};
                     local numR = GetTradeSkillNumReagents and GetTradeSkillNumReagents(i) or 0;
                     for j = 1, numR do
-                        local _, _, rcount = GetTradeSkillReagentInfo(i, j);
+                        local rname, _, rcount = GetTradeSkillReagentInfo(i, j);
                         local rlink = GetTradeSkillReagentItemLink and GetTradeSkillReagentItemLink(i, j) or nil;
                         local rid   = rlink and ItemID and tonumber((ItemID(rlink))) or nil;   -- extra parens: ItemID returns 3 values
-                        if (rid) then
-                            table.insert(reagents, { id = rid, count = tonumber(rcount) or 1 });
+                        -- Keep the reagent's NAME too, and store it even when only the
+                        -- name is available: on the Ascension client
+                        -- GetTradeSkillReagentItemLink can return nil while the name
+                        -- (from GetTradeSkillReagentInfo) is fine.  Atr_Craft_GetCraftCost
+                        -- prices by id OR name, so a name-only reagent still costs out --
+                        -- without this the whole recipe was silently dropped.
+                        if (rid or (rname and rname ~= "")) then
+                            table.insert(reagents, { id = rid, name = rname, count = tonumber(rcount) or 1 });
                         end
                     end
 
@@ -331,17 +337,14 @@ local function Atr_ProfSort_ReagentPrice(id, name)
     return price;
 end
 
--- Per-item craft profit for trade-skill row i, in copper, or nil when it can't
--- be totalled (not a real recipe, unpriced produced item, or any reagent we
--- can't price).  Returns  profit, cost, sell  so a caller can show the parts.
--- Global so the mock-WoW harness can unit-test the maths without a real window.
-function Atr_ProfSort_RowProfit(i)
+-- Per-item craft COST for trade-skill row i, in copper, read live from the open
+-- window, or nil when a reagent can't be priced.  Independent of the produced
+-- item's own market price, so the craft-cost tooltip can show a cost even for an
+-- item that has never been on the AH.  Global for the harness.
+function Atr_ProfSort_RowCost(i)
     if (type(GetTradeSkillInfo) ~= "function") then return nil; end
-    local name, skillType = GetTradeSkillInfo(i);
-    if (skillType == "header" or name == nil) then return nil; end
-
-    local sell = (Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
-    if (sell == nil or sell <= 0) then return nil; end   -- no market price to rank on
+    local _, skillType = GetTradeSkillInfo(i);
+    if (skillType == "header") then return nil; end
 
     local made = 1;
     if (type(GetTradeSkillNumMade) == "function") then
@@ -359,12 +362,69 @@ function Atr_ProfSort_RowProfit(i)
         local rlink = (type(GetTradeSkillReagentItemLink) == "function") and GetTradeSkillReagentItemLink(i, j) or nil;
         local rid   = (rlink and zc and zc.ItemIDfromLink) and tonumber((zc.ItemIDfromLink(rlink))) or nil;   -- extra parens: returns 3 values
         local price = Atr_ProfSort_ReagentPrice(rid, rname);
-        if (price == nil or price <= 0) then return nil; end   -- one unpriceable reagent -> whole recipe unranked
+        if (price == nil or price <= 0) then return nil; end   -- one unpriceable reagent -> whole recipe unpriced
         total = total + price * (tonumber(rcount) or 1);
     end
 
-    local cost = math.floor(total / made);
+    return math.floor(total / made);
+end
+
+-- Per-item craft profit for trade-skill row i, in copper, or nil when it can't
+-- be totalled (not a real recipe, unpriced produced item, or any reagent we
+-- can't price).  Returns  profit, cost, sell  so a caller can show the parts.
+-- Global so the mock-WoW harness can unit-test the maths without a real window.
+function Atr_ProfSort_RowProfit(i)
+    if (type(GetTradeSkillInfo) ~= "function") then return nil; end
+    local name, skillType = GetTradeSkillInfo(i);
+    if (skillType == "header" or name == nil) then return nil; end
+
+    local sell = (Atr_GetAuctionPrice) and tonumber(Atr_GetAuctionPrice(name)) or nil;
+    if (sell == nil or sell <= 0) then return nil; end   -- no market price to rank on
+
+    local cost = Atr_ProfSort_RowCost(i);
+    if (cost == nil) then return nil; end
+
     return (sell - cost), cost, sell;
+end
+
+-- Craft cost for a produced item, read LIVE from the open profession window by
+-- matching the item to the recipe that makes it.  Returns  cost, found  where
+-- found is true when a matching recipe row exists at all (so the tooltip can
+-- say "cost unknown" rather than nothing when the row is there but a reagent
+-- isn't priced).  This is the reliable path on the Ascension client, where the
+-- background harvest into AUCTIONATOR_CRAFT_RECIPES can miss recipes whose
+-- reagent item links come back nil.  Global for the harness.
+function Atr_Craft_LiveCostForItem(link, name)
+    if (type(GetNumTradeSkills) ~= "function") then return nil, false; end
+    local n = GetNumTradeSkills() or 0;
+    if (n <= 0) then return nil, false; end
+
+    local wantID;
+    if (type(link) == "number") then
+        wantID = link;
+    elseif (link and zc and zc.ItemIDfromLink) then
+        wantID = tonumber((zc.ItemIDfromLink(link)));
+    end
+    if (name == nil and link and type(link) ~= "number" and GetItemInfo) then
+        name = GetItemInfo(link);
+    end
+
+    for i = 1, n do
+        local madeName, skillType = GetTradeSkillInfo(i);
+        if (skillType and skillType ~= "header") then
+            local matched = false;
+            if (wantID and type(GetTradeSkillItemLink) == "function") then
+                local madeLink = GetTradeSkillItemLink(i);
+                local madeID = (madeLink and zc and zc.ItemIDfromLink) and tonumber((zc.ItemIDfromLink(madeLink))) or nil;
+                if (madeID and madeID == wantID) then matched = true; end
+            end
+            if (not matched and name and madeName == name) then matched = true; end
+            if (matched) then
+                return Atr_ProfSort_RowCost(i), true;   -- cost may be nil (a reagent unpriced), but the recipe exists
+            end
+        end
+    end
+    return nil, false;
 end
 
 -- Walk the open trade skill and return  order, profitByIndex  where order is a
@@ -471,28 +531,33 @@ local function Atr_ProfSort_Remap()
             if (pos <= numRows) then
                 local realIndex = order[pos];
                 local name, skillType, numAvailable = GetTradeSkillInfo(realIndex);
-                local text = name or "?";
-                if (numAvailable and numAvailable > 0) then text = text .. " [" .. numAvailable .. "]"; end
-                local profit = gProfSort_Profit and gProfSort_Profit[realIndex];
-                if (profit ~= nil) then text = text .. "  " .. Atr_ProfSort_MoneyShort(profit); end
+                local base = name or "?";
+                if (numAvailable and numAvailable > 0) then base = base .. " [" .. numAvailable .. "]"; end
 
-                btn:SetText(text);
-
+                -- Colour by difficulty via an escape code baked into the text, NOT
+                -- SetTextColor: the Ascension list buttons have SetText but no
+                -- SetTextColor method (calling it errored and disabled the sort).
                 local color = (type(TradeSkillTypeColor) == "table") and TradeSkillTypeColor[skillType] or nil;
-                if (color) then
-                    btn:SetTextColor(color.r, color.g, color.b);
-                    if (color.font and btn.SetNormalFontObject) then btn:SetNormalFontObject(color.font); end
-                else
-                    btn:SetTextColor(1, 1, 1);
-                end
+                local hex = color and string.format("%02x%02x%02x",
+                    math.floor((color.r or 1) * 255 + 0.5),
+                    math.floor((color.g or 1) * 255 + 0.5),
+                    math.floor((color.b or 1) * 255 + 0.5)) or "ffffff";
+                local shown = "|cff" .. hex .. base .. "|r";
 
-                btn:SetID(realIndex);              -- stock click/selection reads GetID(): keep it real
+                local profit = gProfSort_Profit and gProfSort_Profit[realIndex];
+                if (profit ~= nil) then shown = shown .. "  " .. Atr_ProfSort_MoneyShort(profit); end
+
+                btn:SetText(shown);
+
+                if (btn.SetID) then btn:SetID(realIndex); end   -- stock click/selection reads GetID(): keep it real
                 btn:Show();
 
-                if (TradeSkillFrame and TradeSkillFrame.selectedSkill == realIndex) then
-                    btn:LockHighlight();
-                else
-                    btn:UnlockHighlight();
+                if (btn.LockHighlight and btn.UnlockHighlight) then
+                    if (TradeSkillFrame and TradeSkillFrame.selectedSkill == realIndex) then
+                        btn:LockHighlight();
+                    else
+                        btn:UnlockHighlight();
+                    end
                 end
             else
                 btn:Hide();

@@ -61,6 +61,7 @@ function GetTradeSkillReagentItemLink (i, j)
   local r = gSkills[i]; local g = r and r.reagents and r.reagents[j]
   return g and g.link or nil
 end
+function GetTradeSkillItemLink (i) local r = gSkills[i]; return r and r.madeLink or nil end
 
 -- price tables keyed the way the real getters are keyed
 local gAuction = {}   -- name -> copper (produced items AND reagents)
@@ -181,5 +182,43 @@ ok (Atr_Craft_HasRecipe (nil, "Frostweave Bag") == true, "knows a name-keyed har
 ok (Atr_Craft_HasRecipe (999) == false,              "reports no recipe for an unknown item")
 AUCTIONATOR_CRAFT_RECIPES = nil
 ok (Atr_Craft_HasRecipe (200) == false,              "no recipe db -> no recipe")
+
+-- ---- RowCost + LiveCostForItem: craft cost without a sell price -------------
+-- The craft-cost tooltip shows a cost even for an item never seen on the AH, and
+-- reads the open window live (the Ascension harvest can miss recipes).
+
+ok (type (Atr_ProfSort_RowCost) == "function",        "exports Atr_ProfSort_RowCost")
+ok (type (Atr_Craft_LiveCostForItem) == "function",   "exports Atr_Craft_LiveCostForItem")
+
+-- Elixir with priced reagents but NO auction price for the elixir itself:
+-- profit is nil (nothing to rank on) but the COST is still known.
+gSkills = {
+  { name = "Elixir", madeLink = "item:500", made = 1, reagents = {
+      { name = "Herb1", link = "item:31", count = 3 },
+      { name = "Herb2", link = "item:32", count = 1 },
+  } },
+}
+gAuction = { ["Herb1"] = 100, ["Herb2"] = 250 }   -- 3*100 + 250 = 550; elixir itself unpriced
+gNPC, gSell = {}, {}
+ok (Atr_ProfSort_RowProfit (1) == nil, "no elixir auction price -> profit nil")
+ok (Atr_ProfSort_RowCost (1) == 550,   "but RowCost still totals the reagents")
+
+-- LiveCostForItem matches by produced-item name and returns that cost.
+local lc, found = Atr_Craft_LiveCostForItem (nil, "Elixir")
+ok (found == true and lc == 550, "LiveCostForItem finds the recipe by name and costs it")
+
+-- Matches by produced-item id (from the link) too.
+lc, found = Atr_Craft_LiveCostForItem (500)
+ok (found == true and lc == 550, "LiveCostForItem finds the recipe by produced-item id")
+
+-- Recipe present but a reagent unpriceable: found=true, cost=nil (so the tooltip
+-- says "cost unknown" rather than nothing).
+gAuction = {}   -- neither herb priced now
+lc, found = Atr_Craft_LiveCostForItem (nil, "Elixir")
+ok (found == true and lc == nil, "unpriceable reagent -> found but no cost")
+
+-- No such recipe in the open window.
+lc, found = Atr_Craft_LiveCostForItem (nil, "Nonexistent")
+ok (found == false and lc == nil, "unknown item -> not found")
 
 print ("\nALL PROFIT SORT TESTS PASSED (" .. pass .. " checks)")
