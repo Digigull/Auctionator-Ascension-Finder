@@ -227,6 +227,12 @@
 				<FontString inherits="GameFontNormal" text="Best-price highlight colour">
 					<Anchors><Anchor point="TOPLEFT"><Offset x="20" y="-372"/></Anchor></Anchors>
 				</FontString>
+				<FontString inherits="GameFontNormal" text="Show item quantity in tooltips">
+					<Anchors><Anchor point="TOPLEFT"><Offset x="20" y="-432"/></Anchor></Anchors>
+				</FontString>
+				<FontString inherits="GameFontNormal" text="Show bag locations">
+					<Anchors><Anchor point="TOPLEFT"><Offset x="20" y="-492"/></Anchor></Anchors>
+				</FontString>
 			</Layer>
 		</Layers>
 
@@ -307,6 +313,30 @@
 					<OnClick>	Atr_TipsColorSwatch_OnClick ();	</OnClick>
 				</Scripts>
 			</Button>
+
+			<Frame name="Atr_qtyTipsDD" inherits="UIDropDownMenuTemplate">
+				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="50" y="-448"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnLoad>
+						UIDropDownMenu_Initialize(self, Atr_qtyTipsDD_Initialize);
+						UIDropDownMenu_SetWidth (Atr_qtyTipsDD, 175, 5);
+						UIDropDownMenu_JustifyText (Atr_qtyTipsDD, "LEFT");
+						UIDropDownMenu_SetSelectedValue(Atr_qtyTipsDD, 5);
+					</OnLoad>
+				</Scripts>
+			</Frame>
+
+			<Frame name="Atr_qtyLocDD" inherits="UIDropDownMenuTemplate">
+				<Anchors><Anchor point="TOPLEFT"><Offset><AbsDimension x="50" y="-508"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnLoad>
+						UIDropDownMenu_Initialize(self, Atr_qtyLocDD_Initialize);
+						UIDropDownMenu_SetWidth (Atr_qtyLocDD, 175, 5);
+						UIDropDownMenu_JustifyText (Atr_qtyLocDD, "LEFT");
+						UIDropDownMenu_SetSelectedValue(Atr_qtyLocDD, 3);
+					</OnLoad>
+				</Scripts>
+			</Frame>
 		</Frames>
 	</Frame>
 

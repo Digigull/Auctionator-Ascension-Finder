@@ -74,6 +74,19 @@ UI that trusts the AH API's level values.
   Auctionator → Tooltips*: which lines show, whether they need Alt, and the
   highlight colour (a standard colour-picker swatch).
 
+- **Item quantity on tooltips** — item tooltips gain a **Qty** line totalling how
+  many you own across all your characters; hold **Alt** and it expands into a
+  breakdown of where they sit: per character (bags vs. bank) and in the
+  account-wide web-shop **Personal Bank** / **Realm Bank** (with the tab numbers
+  that hold it). Counts are remembered as each character's bags update, its bank
+  is opened, and each web-shop bank is opened, so the total is right even away
+  from a bank. Both the quantity line and the location breakdown are
+  independently configurable (always / never / Shift / Ctrl / Alt) under
+  *Tooltips*; quantity defaults to **always** and locations to **hold Alt**. The
+  Personal and Realm banks are told apart by their first tab's name — the way
+  Ascension routes them through the guild-bank frame. *(The genuine guild bank
+  reports no tabs through that API and is a separate opt-in follow-up.)*
+
 For the full design, see the notes in [`Old Docs/`](Old%20Docs/) —
 especially [`FINDER-ARCHITECTURE.md`](Old%20Docs/FINDER-ARCHITECTURE.md),
 [`BAZAAR-ARCHITECTURE.md`](Old%20Docs/BAZAAR-ARCHITECTURE.md),
