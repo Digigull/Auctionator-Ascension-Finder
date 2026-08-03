@@ -1935,6 +1935,13 @@ local function ShowTipWithPricing (tip, link, num)
 	local itemID = zc.ItemIDfromLink (link);
 	itemID = tonumber(itemID);
 
+	-- FINDER_TAB: "Qty: N" (+ per-character bag/bank locations on a held
+	-- modifier).  Implemented in AuctionatorFinderItemCount.lua so this file
+	-- doesn't grow another feature; guarded so a load-order slip can't error.
+	if (type (Atr_ItemCount_AddToTip) == "function") then
+		Atr_ItemCount_AddToTip (tip, itemID);
+	end
+
 	local vendorPrice	= 0;
 	local auctionPrice	= 0;
     local auctionMedianPrice = 0;

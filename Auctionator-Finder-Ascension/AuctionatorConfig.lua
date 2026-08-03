@@ -151,6 +151,13 @@ function Atr_SetupTooltipsOptionsFrame ()
 	UIDropDownMenu_Initialize(Atr_tipsAltDD, Atr_tipsAltDD_Initialize);
 	UIDropDownMenu_SetSelectedValue(Atr_tipsAltDD, AUCTIONATOR_TIPS_ALT);
 
+	-- FINDER_TAB: item-quantity / bag-location dropdowns
+	UIDropDownMenu_Initialize(Atr_qtyTipsDD, Atr_qtyTipsDD_Initialize);
+	UIDropDownMenu_SetSelectedValue(Atr_qtyTipsDD, AUCTIONATOR_QTY_TIPS);
+
+	UIDropDownMenu_Initialize(Atr_qtyLocDD, Atr_qtyLocDD_Initialize);
+	UIDropDownMenu_SetSelectedValue(Atr_qtyLocDD, AUCTIONATOR_QTY_LOC_TIPS);
+
 	Atr_TipsColorSwatch_SetHex (AUCTIONATOR_TIPS_HL_COLOR);
 end
 
@@ -159,7 +166,7 @@ end
 
 function Atr_TooltipsOptionsFrame_Save()
 
-	local origValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR);
+	local origValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR, AUCTIONATOR_QTY_TIPS, AUCTIONATOR_QTY_LOC_TIPS);
 
 	AUCTIONATOR_V_TIPS		= zc.BoolToNum(ATR_tipsVendorOpt_CB:GetChecked ());
 	AUCTIONATOR_A_TIPS		= zc.BoolToNum(ATR_tipsAuctionOpt_CB:GetChecked ());
@@ -168,9 +175,11 @@ function Atr_TooltipsOptionsFrame_Save()
 	AUCTIONATOR_SHIFT_TIPS		= UIDropDownMenu_GetSelectedValue(Atr_tipsShiftDD);
 	AUCTIONATOR_DE_DETAILS_TIPS	= UIDropDownMenu_GetSelectedValue(Atr_deDetailsDD);
 	AUCTIONATOR_TIPS_ALT		= UIDropDownMenu_GetSelectedValue(Atr_tipsAltDD);
+	AUCTIONATOR_QTY_TIPS		= UIDropDownMenu_GetSelectedValue(Atr_qtyTipsDD);
+	AUCTIONATOR_QTY_LOC_TIPS	= UIDropDownMenu_GetSelectedValue(Atr_qtyLocDD);
 	AUCTIONATOR_TIPS_HL_COLOR	= Atr_TipsColorSwatch_GetHex ();
 
-	local newValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR);
+	local newValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR, AUCTIONATOR_QTY_TIPS, AUCTIONATOR_QTY_LOC_TIPS);
 
 	if (origValues ~= newValues) then
 		zc.msg_atr (ZT("tooltip configuration saved"));
@@ -256,6 +265,50 @@ end
 -----------------------------------------
 
 function Atr_tipsAltDD_OnClick(self)
+	UIDropDownMenu_SetSelectedValue(self.owner, self.value);
+end
+
+-----------------------------------------
+-- FINDER_TAB: "show item quantity" dropdown.  Values match the disenchant-detail
+-- scale: 1=SHIFT, 2=CONTROL, 3=ALT, 4=never, 5=always.  Default is 5 (always).
+
+function Atr_qtyTipsDD_Initialize(self)
+
+	local info = UIDropDownMenu_CreateInfo();
+
+	Atr_AddMenuPick (self, info, ZT("always"),					5, Atr_qtyTipsDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("never"),					4, Atr_qtyTipsDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("when SHIFT is held down"),	1, Atr_qtyTipsDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("when CONTROL is held down"),	2, Atr_qtyTipsDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("when ALT is held down"),		3, Atr_qtyTipsDD_OnClick);
+
+end
+
+-----------------------------------------
+
+function Atr_qtyTipsDD_OnClick(self)
+	UIDropDownMenu_SetSelectedValue(self.owner, self.value);
+end
+
+-----------------------------------------
+-- FINDER_TAB: "show bag locations" dropdown.  Same scale as above; default is
+-- 3 (hold ALT), so the quantity shows plainly and locations expand on a modifier.
+
+function Atr_qtyLocDD_Initialize(self)
+
+	local info = UIDropDownMenu_CreateInfo();
+
+	Atr_AddMenuPick (self, info, ZT("when ALT is held down"),		3, Atr_qtyLocDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("when CONTROL is held down"),	2, Atr_qtyLocDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("when SHIFT is held down"),	1, Atr_qtyLocDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("always"),					5, Atr_qtyLocDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("never"),					4, Atr_qtyLocDD_OnClick);
+
+end
+
+-----------------------------------------
+
+function Atr_qtyLocDD_OnClick(self)
 	UIDropDownMenu_SetSelectedValue(self.owner, self.value);
 end
 

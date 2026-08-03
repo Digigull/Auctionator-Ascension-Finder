@@ -104,6 +104,8 @@ AUCTIONATOR_SHIFT_TIPS		= 1;
 AUCTIONATOR_DE_DETAILS_TIPS	= 4;		-- off by default
 AUCTIONATOR_TIPS_ALT		= 1;		-- FINDER_TAB: hide addon prices (except Vendor) until ALT is held
 AUCTIONATOR_TIPS_HL_COLOR	= "3399FF";	-- FINDER_TAB: best-price highlight colour, hex RRGGBB (default blue)
+AUCTIONATOR_QTY_TIPS		= 5;		-- FINDER_TAB: item-quantity line: 1=Shift 2=Ctrl 3=Alt 4=never 5=always (default always)
+AUCTIONATOR_QTY_LOC_TIPS	= 3;		-- FINDER_TAB: bag-location breakdown: same scale, default 3 = hold ALT
 AUCTIONATOR_DEFTAB			= 1;
 
 AUCTIONATOR_OPEN_FIRST		= 0;	-- obsolete - just needed for migration
