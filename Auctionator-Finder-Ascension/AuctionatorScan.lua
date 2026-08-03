@@ -672,14 +672,23 @@ function AtrSearch:Finish()
 				-- number drifted away from a median built only from full scans --
 				-- the two tooltip lines were drawn from different populations, and
 				-- names touched only here got an auction price but no samples at
-				-- all.  Append the same value here too, matching the full-scan /
-				-- Finder / Bazaar feeds: cap at 15, evict at random when full,
-				-- keep sorted for Atr_GetMeanPrice.
+				-- all.  Append a sample here too, matching the full-scan / Finder /
+				-- Bazaar feeds: cap at 15, evict at random when full, keep sorted
+				-- for Atr_GetMeanPrice.
+				--
+				-- The sample is the quantity-weighted median of THIS scan's
+				-- current listings, not its single lowest price -- see
+				-- Atr_WeightedMedianPrice.  Feeding the lowest price made the
+				-- median collapse onto the Auction line; the across-listings
+				-- median lets it reflect the whole book.  Fall back to the lowest
+				-- price only when no listing detail is available.
 				if (type (gAtr_MeanDB) == "table") then
+					local medsample = Atr_ScanListingsMedian (scn) or newprice;
+
 					local m = gAtr_MeanDB[scn.itemName];
 					if (type (m) ~= "table") then m = {}; gAtr_MeanDB[scn.itemName] = m; end
 					if (#m >= 15) then tremove (m, math.random (1, #m)); end
-					tinsert (m, newprice);
+					tinsert (m, medsample);
 					table.sort (m);
 				end
 			end
@@ -1106,13 +1115,103 @@ end
 -----------------------------------------
 
 function Atr_CalcNewDBprice (name, prices)
-		
+
 	if (prices[1] ~= BIGNUM) then
 		return prices[1];
 	end
 
 	return 0;
-	
+
+end
+
+-----------------------------------------
+
+-- FINDER_TAB: quantity-weighted median of a scan's CURRENT listings.
+--
+-- The "Auction median" tooltip line reads from gAtr_MeanDB, a rolling set of
+-- up-to-15 per-scan samples.  Each scan used to contribute only its single
+-- LOWEST per-unit price (Atr_CalcNewDBprice -> prices[1]) -- the same figure
+-- the "Auction" line already shows.  A commodity whose lowest price barely
+-- moves therefore filled the whole sample set with that one low value, so the
+-- median sat ON the lowest price and never reflected the rest of the book.
+--
+-- This computes the median ACROSS the listings instead, weighted by quantity:
+-- every item for sale gets a vote, so a wall of 19 stacks counts far more than
+-- a lone lowball stack.  Feeding THIS as the per-scan sample lets the median
+-- track where supply actually sits.  `entries` is an array of
+-- { price = <per-unit copper>, weight = <#items in the listing> }.  Returns a
+-- floored median, or 0 when there is nothing to measure.
+function Atr_WeightedMedianPrice (entries)
+
+	if (type (entries) ~= "table" or #entries == 0) then
+		return 0;
+	end
+
+	table.sort (entries, function (a, b) return a.price < b.price; end);
+
+	local total = 0;
+	local i;
+	for i = 1, #entries do
+		total = total + (entries[i].weight or 0);
+	end
+
+	if (total <= 0) then
+		return 0;
+	end
+
+	local half = total / 2;
+	local cum  = 0;
+	for i = 1, #entries do
+		cum = cum + (entries[i].weight or 0);
+		if (cum > half) then
+			return math.floor (entries[i].price);
+		end
+		if (cum == half) then
+			-- exact split: average the two straddling prices for a true median
+			local nextp = (entries[i + 1] and entries[i + 1].price) or entries[i].price;
+			return math.floor ((entries[i].price + nextp) / 2);
+		end
+	end
+
+	return math.floor (entries[#entries].price);
+end
+
+-----------------------------------------
+
+-- FINDER_TAB: quantity-weighted median of a single AtrScan's listings.
+--
+-- Walks scn.scanData -- every real auction posting for the item -- and returns
+-- the across-listings median (see Atr_WeightedMedianPrice).  Synthetic
+-- "__wowEcon*/__wowHead/__allakhazam/__atrLast" seed rows are skipped so the
+-- median rests on the live market, matching the population the Auction line's
+-- lowprices are drawn from.  Returns nil when there is no usable listing, so
+-- the caller can fall back to the lowest-price sample.
+function Atr_ScanListingsMedian (scn)
+
+	if (type (scn) ~= "table" or type (scn.scanData) ~= "table") then
+		return nil;
+	end
+
+	local entries = {};
+	local i, sd;
+	for i, sd in ipairs (scn.scanData) do
+		local o = sd.owner;
+		local synthetic = (type (o) == "string" and string.sub (o, 1, 2) == "__");
+		if (not synthetic and sd.buyoutPrice and sd.buyoutPrice > 0
+				and sd.stackSize and sd.stackSize > 0) then
+			tinsert (entries, {
+				price  = sd.buyoutPrice / sd.stackSize,
+				weight = sd.stackSize,
+			});
+		end
+	end
+
+	local med = Atr_WeightedMedianPrice (entries);
+	if (med > 0) then
+		return med;
+	end
+
+	return nil;
 end
 
 -----------------------------------------
@@ -1184,8 +1283,13 @@ function Atr_FullScanAnalyze()
 
 	local lowprices = {};
 	local x;
-	
+
 	local qualities = {};
+
+	-- FINDER_TAB: per-name listing detail for the quantity-weighted median
+	-- sample (see Atr_WeightedMedianPrice).  lowprices alone can only feed the
+	-- median its single lowest price, which pins the median to the Auction line.
+	local alllistings = {};
 	
 	if (numBatchAuctions > 0) then
 
@@ -1202,13 +1306,16 @@ function Atr_FullScanAnalyze()
                 qualities[name] = quality;
 			
 				local itemPrice = math.floor (buyoutPrice / count);
-			
+
 				if (itemPrice > 0) then
 					if (not lowprices[name]) then
 						lowprices[name] = {BIGNUM,BIGNUM,BIGNUM};		-- one extra for later
 					end
-					
+
 					Atr_AddToLowPrices (lowprices[name], itemPrice);
+
+					if (not alllistings[name]) then alllistings[name] = {}; end
+					tinsert (alllistings[name], { price = itemPrice, weight = count });
 				end
 			end
 
@@ -1248,11 +1355,19 @@ function Atr_FullScanAnalyze()
 				end
 
 				gAtr_ScanDB[name] = newprice;
+
+                -- Sample the quantity-weighted median of this scan's listings,
+                -- not its lowest price, so the median reflects the whole book
+                -- (Atr_WeightedMedianPrice).  Fall back to newprice if detail
+                -- is somehow missing.
+                local medsample = Atr_WeightedMedianPrice (alllistings[name] or {});
+                if (medsample <= 0) then medsample = newprice; end
+
                 if #gAtr_MeanDB[name] < 15 then
-                    table.insert(gAtr_MeanDB[name], newprice)
+                    table.insert(gAtr_MeanDB[name], medsample)
                 else
                     table.remove(gAtr_MeanDB[name], math.random(1, #gAtr_MeanDB[name]))
-                    table.insert(gAtr_MeanDB[name], newprice)
+                    table.insert(gAtr_MeanDB[name], medsample)
                 end
 			end
 		end

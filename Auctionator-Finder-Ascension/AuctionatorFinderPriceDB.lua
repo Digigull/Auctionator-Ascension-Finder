@@ -110,6 +110,12 @@ function Fdr_PriceDB_Update (results, partial)
 	local lows, quals, skipped = {}, {}, 0;
 	local candidates = 0;						-- distinct names that cleared rules 2 and 4
 
+	-- FINDER_TAB: per-name listing detail for the quantity-weighted median
+	-- sample.  lows alone can only feed the median the lowest price, pinning it
+	-- to the Auction line; the across-listings median (Atr_WeightedMedianPrice)
+	-- lets it reflect the whole book instead.
+	local listings = {};
+
 	local i;
 	for i = 1, #results do
 
@@ -134,6 +140,9 @@ function Fdr_PriceDB_Update (results, partial)
 							lows[rec.name] = unit;
 						end
 						quals[rec.name] = rec.quality or 1;
+
+						if (not listings[rec.name]) then listings[rec.name] = {}; end
+						tinsert (listings[rec.name], { price = unit, weight = cnt });
 					end
 				end
 			end
@@ -157,10 +166,16 @@ function Fdr_PriceDB_Update (results, partial)
 			end
 
 			if (price and type (gAtr_MeanDB) == "table") then
+				local medsample = price;
+				if (type (Atr_WeightedMedianPrice) == "function") then
+					local wm = Atr_WeightedMedianPrice (listings[name] or {});
+					if (wm > 0) then medsample = wm; end
+				end
+
 				local m = gAtr_MeanDB[name];
 				if (type (m) ~= "table") then m = {}; gAtr_MeanDB[name] = m; end
 				if (#m >= 15) then table.remove (m, math.random (1, #m)); end
-				tinsert (m, price);
+				tinsert (m, medsample);
 				table.sort (m);
 			end
 		end
