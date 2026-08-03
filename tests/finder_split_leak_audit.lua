@@ -24,6 +24,7 @@ local SPLITS = {
   DIR .. "AuctionatorFinderPriceDB.lua",
   DIR .. "AuctionatorFinderFullScan.lua",
   DIR .. "AuctionatorFinderOptions.lua",
+  DIR .. "AuctionatorFinderBuyRedirect.lua",
 }
 
 local function read (p)

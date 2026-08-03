@@ -85,4 +85,13 @@ load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderOptions.lua")
 ok (type (Fdr_Options_Sync) == "function", "options split defines Fdr_Options_Sync")
 ok (type (Fdr_Options_Init) == "function", "options split defines Fdr_Options_Init")
 
+-- ---- Buy-tab redirect split ----
+load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderBuyRedirect.lua")
+
+ok (type (Atr_Finder_JumpFromBuy) == "function", "buy-redirect split defines Atr_Finder_JumpFromBuy")
+-- The split file must wrap Atr_Search_Onclick, capturing the prior value on
+-- the shared redirect table.
+ok (type (Atr_Search_Onclick) == "function", "buy-redirect split installs the Atr_Search_Onclick wrapper")
+ok (addonTable.Finder.Redir.prevSearch ~= nil, "buy-redirect captured the previous Atr_Search_Onclick")
+
 print ("\nALL FINDER SPLIT LOAD TESTS PASSED (" .. pass .. " checks)")
