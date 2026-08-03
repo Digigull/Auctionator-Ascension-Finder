@@ -73,4 +73,10 @@ ok (Fdr_PriceDB_Enabled () == true, "Fdr_PriceDB_Enabled defaults on via split f
 -- The /atrprices inspector must register from the split file.
 ok (type (SlashCmdList["ATRPRICEFEED"]) == "function", "/atrprices registers from split file")
 
+-- ---- full scan replacement split ----
+load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderFullScan.lua")
+
+ok (type (Fdr_FS_Running) == "function", "full-scan split defines Fdr_FS_Running")
+ok (type (Atr_FullScanStart) == "function", "full-scan split defines Atr_FullScanStart")
+
 print ("\nALL FINDER SPLIT LOAD TESTS PASSED (" .. pass .. " checks)")

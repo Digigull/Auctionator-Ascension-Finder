@@ -22,6 +22,7 @@ local CORE = DIR .. "AuctionatorFinder.lua"
 -- every file split out of core; extend this as more slices land
 local SPLITS = {
   DIR .. "AuctionatorFinderPriceDB.lua",
+  DIR .. "AuctionatorFinderFullScan.lua",
 }
 
 local function read (p)

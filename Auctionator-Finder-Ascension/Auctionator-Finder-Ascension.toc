@@ -34,6 +34,7 @@ AuctionatorConfig.lua
 AuctionatorBuy.lua
 AuctionatorFinder.lua
 AuctionatorFinderPriceDB.lua
+AuctionatorFinderFullScan.lua
 AuctionatorBazaar.lua
 
 AuctionatorConfig.xml
