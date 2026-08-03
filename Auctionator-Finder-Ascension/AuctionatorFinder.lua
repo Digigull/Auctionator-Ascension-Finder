@@ -2784,7 +2784,11 @@ end
 -- about the feed changed.
 -- ===========================================================================
 
+-- Shared Finder surface: the handful of symbols the split-out Finder files
+-- (AuctionatorFinder*.lua, loaded after this one) reach back into.  Everything
+-- else in those files talks to the rest of the addon through globals as before.
 addonTable.Finder = addonTable.Finder or {};
+addonTable.Finder.FT          = FT;					-- ZT() localization wrapper
 addonTable.Finder.MoneyString = Fdr_MoneyString;			-- copper -> gold string
 addonTable.Finder.GetResults  = function () return gFdr_Results; end;	-- live raw scan records
 addonTable.Finder.GetCapHit   = function () return gFdr_CapHit;  end;	-- was the scan truncated?

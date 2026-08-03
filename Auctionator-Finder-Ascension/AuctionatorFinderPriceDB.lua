@@ -16,11 +16,13 @@
 -------------------------------------------------------------------------------
 
 local addonName, addonTable = ...;
-local F = addonTable and addonTable.Finder;
+local zc = addonTable and addonTable.zc;		-- same idiom every Auctionator file uses
+local F  = addonTable and addonTable.Finder;
 
--- Pulled from the shared Finder surface (see header). Fdr_MoneyString is a
--- stable closure, safe to capture once at load; the scan state is read live
--- through F.Get* accessors because it changes every scan.
+-- Pulled from the shared Finder surface (see header). FT and Fdr_MoneyString
+-- are stable closures, safe to capture once at load; the scan state is read
+-- live through F.Get* accessors because it changes every scan.
+local FT              = F and F.FT;
 local Fdr_MoneyString = F and F.MoneyString;
 
 -- ===========================================================================
