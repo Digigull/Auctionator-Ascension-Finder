@@ -21,6 +21,7 @@ local DIR  = "Auctionator-Finder-Ascension/"
 local CORE = DIR .. "AuctionatorFinder.lua"
 -- every file split out of core; extend this as more slices land
 local SPLITS = {
+  DIR .. "AuctionatorFinderResearch.lua",
   DIR .. "AuctionatorFinderPriceDB.lua",
   DIR .. "AuctionatorFinderFullScan.lua",
   DIR .. "AuctionatorFinderOptions.lua",

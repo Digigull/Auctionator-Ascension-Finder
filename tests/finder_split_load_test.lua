@@ -55,6 +55,11 @@ ok (type (addonTable.Finder.MoneyString) == "function", "Finder surface exports 
 ok (type (addonTable.Finder.GetResults) == "function",  "Finder surface exports GetResults")
 ok (type (addonTable.Finder.GetCapHit) == "function",   "Finder surface exports GetCapHit")
 
+-- ---- research ledger split ----
+load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderResearch.lua")
+ok (type (Fdr_Research_Targets) == "function", "research split defines Fdr_Research_Targets")
+ok (type (SlashCmdList["ATRRESEARCHTARGET"]) == "function", "/atrtarget registers from research split")
+
 load_addon_file ("Auctionator-Finder-Ascension/AuctionatorFinderPriceDB.lua")
 
 ok (type (Fdr_PriceDB_Enabled) == "function", "split file defines Fdr_PriceDB_Enabled")

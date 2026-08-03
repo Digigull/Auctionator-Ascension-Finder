@@ -29,12 +29,22 @@ DUMMY = setmetatable ({}, {
 -- below, tinsert, string/math/table) plus zc, which we pinned falsy above.
 setmetatable (_G, { __index = function (_, k) return DUMMY end })
 
--- ---- load the addon file ----
-local path = arg[1] or "Auctionator-Finder-Ascension/AuctionatorFinder.lua"
-local chunk, err = loadfile (path)
-assert (chunk, "loadfile failed: "..tostring (err))
-local ok, lerr = pcall (chunk)
-assert (ok, "load-time error: "..tostring (lerr))
+-- ---- load the addon files ----
+-- The research ledger (Fdr_Research_Targets and the /atrtarget handler) now
+-- lives in AuctionatorFinderResearch.lua, which reaches back into the core
+-- Finder file through the shared addon table. Load both files in .toc order
+-- with ONE shared addonTable so that shared surface resolves, exactly as the
+-- client passes it.
+local DIR = "Auctionator-Finder-Ascension/"
+local addonTable = {}
+local function load_addon (path)
+  local chunk, err = loadfile (path)
+  assert (chunk, "loadfile failed: "..path..": "..tostring (err))
+  local ok, lerr = pcall (chunk, "Auctionator-Finder-Ascension", addonTable)
+  assert (ok, "load-time error in "..path..": "..tostring (lerr))
+end
+load_addon (arg[1] or DIR.."AuctionatorFinder.lua")
+load_addon (DIR.."AuctionatorFinderResearch.lua")
 
 -- ---- build a synthetic ledger ----
 -- item A: cheap LOW-level complete ladder (like 4661) - dominates the old score
