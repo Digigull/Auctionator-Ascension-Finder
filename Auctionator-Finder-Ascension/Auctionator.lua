@@ -102,6 +102,8 @@ AUCTIONATOR_A_TIPS			= 1;
 AUCTIONATOR_D_TIPS			= 1;
 AUCTIONATOR_SHIFT_TIPS		= 1;
 AUCTIONATOR_DE_DETAILS_TIPS	= 4;		-- off by default
+AUCTIONATOR_TIPS_ALT		= 1;		-- FINDER_TAB: hide addon prices (except Vendor) until ALT is held
+AUCTIONATOR_TIPS_HL_COLOR	= "3399FF";	-- FINDER_TAB: best-price highlight colour, hex RRGGBB (default blue)
 AUCTIONATOR_DEFTAB			= 1;
 
 AUCTIONATOR_OPEN_FIRST		= 0;	-- obsolete - just needed for migration

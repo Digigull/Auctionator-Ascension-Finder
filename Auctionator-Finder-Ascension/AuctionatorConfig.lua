@@ -147,6 +147,11 @@ function Atr_SetupTooltipsOptionsFrame ()
 	
 	UIDropDownMenu_Initialize(Atr_deDetailsDD, Atr_deDetailsDD_Initialize);
 	UIDropDownMenu_SetSelectedValue(Atr_deDetailsDD, AUCTIONATOR_DE_DETAILS_TIPS);
+
+	UIDropDownMenu_Initialize(Atr_tipsAltDD, Atr_tipsAltDD_Initialize);
+	UIDropDownMenu_SetSelectedValue(Atr_tipsAltDD, AUCTIONATOR_TIPS_ALT);
+
+	Atr_TipsColorSwatch_SetHex (AUCTIONATOR_TIPS_HL_COLOR);
 end
 
 
@@ -154,7 +159,7 @@ end
 
 function Atr_TooltipsOptionsFrame_Save()
 
-	local origValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS);
+	local origValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR);
 
 	AUCTIONATOR_V_TIPS		= zc.BoolToNum(ATR_tipsVendorOpt_CB:GetChecked ());
 	AUCTIONATOR_A_TIPS		= zc.BoolToNum(ATR_tipsAuctionOpt_CB:GetChecked ());
@@ -162,8 +167,10 @@ function Atr_TooltipsOptionsFrame_Save()
 
 	AUCTIONATOR_SHIFT_TIPS		= UIDropDownMenu_GetSelectedValue(Atr_tipsShiftDD);
 	AUCTIONATOR_DE_DETAILS_TIPS	= UIDropDownMenu_GetSelectedValue(Atr_deDetailsDD);
+	AUCTIONATOR_TIPS_ALT		= UIDropDownMenu_GetSelectedValue(Atr_tipsAltDD);
+	AUCTIONATOR_TIPS_HL_COLOR	= Atr_TipsColorSwatch_GetHex ();
 
-	local newValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS);
+	local newValues = zc.msg_str (AUCTIONATOR_V_TIPS, AUCTIONATOR_A_TIPS, AUCTIONATOR_D_TIPS, AUCTIONATOR_SHIFT_TIPS, AUCTIONATOR_DE_DETAILS_TIPS, AUCTIONATOR_TIPS_ALT, AUCTIONATOR_TIPS_HL_COLOR);
 
 	if (origValues ~= newValues) then
 		zc.msg_atr (ZT("tooltip configuration saved"));
@@ -230,6 +237,109 @@ end
 
 function Atr_deDetailsDD_OnClick(self)
 	UIDropDownMenu_SetSelectedValue(self.owner, self.value);
+end
+
+-----------------------------------------
+-- FINDER_TAB: "reveal addon prices" dropdown.  0 = always show every line,
+-- 1 = keep the auction/median/disenchant/craft lines hidden until ALT is held
+-- (the Vendor line always shows).
+
+function Atr_tipsAltDD_Initialize(self)
+
+	local info = UIDropDownMenu_CreateInfo();
+
+	Atr_AddMenuPick (self, info, ZT("always"),					0, Atr_tipsAltDD_OnClick);
+	Atr_AddMenuPick (self, info, ZT("only when ALT is held"),	1, Atr_tipsAltDD_OnClick);
+
+end
+
+-----------------------------------------
+
+function Atr_tipsAltDD_OnClick(self)
+	UIDropDownMenu_SetSelectedValue(self.owner, self.value);
+end
+
+-----------------------------------------
+-- FINDER_TAB: best-price highlight colour swatch.  The colour is stored as a
+-- hex "RRGGBB" string in AUCTIONATOR_TIPS_HL_COLOR; these helpers convert to and
+-- from the 0-1 RGB the swatch texture and ColorPickerFrame use.
+
+function Atr_TipsColor_HexToRGB (hex)
+
+	if (type (hex) ~= "string" or not hex:match ("^%x%x%x%x%x%x$")) then
+		hex = "3399FF";		-- default blue
+	end
+
+	local r = tonumber (hex:sub (1, 2), 16) / 255;
+	local g = tonumber (hex:sub (3, 4), 16) / 255;
+	local b = tonumber (hex:sub (5, 6), 16) / 255;
+
+	return r, g, b;
+end
+
+-----------------------------------------
+
+function Atr_TipsColor_RGBToHex (r, g, b)
+	return string.format ("%02X%02X%02X",
+		math.floor (r * 255 + 0.5),
+		math.floor (g * 255 + 0.5),
+		math.floor (b * 255 + 0.5));
+end
+
+-----------------------------------------
+
+function Atr_TipsColorSwatch_SetHex (hex)
+
+	local r, g, b = Atr_TipsColor_HexToRGB (hex);
+
+	Atr_TipsColorSwatch.r = r;
+	Atr_TipsColorSwatch.g = g;
+	Atr_TipsColorSwatch.b = b;
+
+	if (Atr_TipsColorSwatchColor) then
+		Atr_TipsColorSwatchColor:SetVertexColor (r, g, b);
+	end
+end
+
+-----------------------------------------
+
+function Atr_TipsColorSwatch_GetHex ()
+
+	local r = Atr_TipsColorSwatch.r or 0.2;
+	local g = Atr_TipsColorSwatch.g or 0.6;
+	local b = Atr_TipsColorSwatch.b or 1.0;
+
+	return Atr_TipsColor_RGBToHex (r, g, b);
+end
+
+-----------------------------------------
+
+function Atr_TipsColorSwatch_OnClick ()
+
+	local r = Atr_TipsColorSwatch.r or 0.2;
+	local g = Atr_TipsColorSwatch.g or 0.6;
+	local b = Atr_TipsColorSwatch.b or 1.0;
+
+	local function applyColor ()
+		local nr, ng, nb = ColorPickerFrame:GetColorRGB ();
+		Atr_TipsColorSwatch_SetHex (Atr_TipsColor_RGBToHex (nr, ng, nb));
+	end
+
+	local function cancelColor (prev)
+		if (prev and prev.r) then
+			Atr_TipsColorSwatch_SetHex (Atr_TipsColor_RGBToHex (prev.r, prev.g, prev.b));
+		end
+	end
+
+	ColorPickerFrame.func			= applyColor;
+	ColorPickerFrame.cancelFunc		= cancelColor;
+	ColorPickerFrame.hasOpacity		= false;
+	ColorPickerFrame.previousValues	= { r = r, g = g, b = b };
+
+	ColorPickerFrame:SetColorRGB (r, g, b);
+
+	ColorPickerFrame:Hide();		-- force OnShow so the picker re-initialises to our colour
+	ColorPickerFrame:Show();
 end
 
 -----------------------------------------
