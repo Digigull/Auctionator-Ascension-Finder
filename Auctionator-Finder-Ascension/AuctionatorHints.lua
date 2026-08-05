@@ -2243,6 +2243,48 @@ hooksecurefunc (GameTooltip, "SetGuildBankItem",
 	end
 );
 
+-- A focused search/filter EditBox swallows the Alt/Shift/Ctrl keys, so the
+-- client's modifier tracker never sees them pressed and IsAltKeyDown() reads
+-- false.  That silently hid the Alt-gated reagent "Qty/locations" lines while
+-- the cursor still blinked in the profession window's filter box -- the fix the
+-- player had found by hand was to press Escape (drop the box's focus) first.
+-- Clearing that keyboard focus for them, the moment they hover a reagent, lets
+-- the modifier keys register again.  Best-effort and fully guarded: on a client
+-- where we can't find the focused box we simply do nothing.
+local function Atr_ClearProfSearchFocus ()
+	-- Preferred: the client's own "who owns the keyboard" accessor, when present.
+	if (type (GetCurrentKeyBoardFocus) == "function") then
+		local ok, eb = pcall (GetCurrentKeyBoardFocus);
+		if (ok and eb and eb.HasFocus and eb.ClearFocus and eb:HasFocus()) then
+			eb:ClearFocus();
+			return;
+		end
+	end
+
+	-- Fallback: walk the profession window's frames for a focused EditBox and
+	-- drop it.  Bounded so a surprise frame tree can't spin.
+	local root = TradeSkillFrame;
+	if (root == nil or type (root.GetChildren) ~= "function") then return; end
+	local stack, guard = { root }, 0;
+	while (#stack > 0 and guard < 400) do
+		guard = guard + 1;
+		local f = table.remove (stack);
+		if (type (f) == "table") then
+			if (f.HasFocus and f.ClearFocus and f:HasFocus ()) then
+				f:ClearFocus ();
+				return;
+			end
+			if (type (f.GetChildren) == "function") then
+				for _, k in ipairs ({ f:GetChildren () }) do stack[#stack + 1] = k; end
+			end
+		end
+	end
+end
+
+-- The reagent/recipe the trade-skill tooltip is currently showing, remembered so
+-- a modifier press can re-render exactly that tooltip (below).
+local gAtr_TSTip = { skill = nil, id = nil, owner = nil };
+
 hooksecurefunc (GameTooltip, "SetTradeSkillItem",
 	function (tip, skill, id)
 		local link = GetTradeSkillItemLink(skill);
@@ -2264,9 +2306,44 @@ hooksecurefunc (GameTooltip, "SetTradeSkillItem",
 			link = select (2, tip:GetItem());
 		end
 
+		-- Remember what this tooltip is showing, then drop any lingering search-box
+		-- focus so the player's Alt press actually registers (see the helper and
+		-- the MODIFIER_STATE_CHANGED refresh below).
+		gAtr_TSTip.skill = skill;
+		gAtr_TSTip.id    = id;
+		gAtr_TSTip.owner = (tip and tip.GetOwner) and (tip:GetOwner ()) or nil;
+		pcall (Atr_ClearProfSearchFocus);
+
 		ShowTipWithPricing (tip, link, num);
 	end
 );
+
+-- Live-refresh the trade-skill tooltip when a modifier key changes.  Without
+-- this, pressing Alt while already hovering a reagent does nothing (the tooltip
+-- is only built on hover, and nothing rebuilds it on a key change), so the
+-- Alt-gated location lines would only ever appear if Alt happened to be held at
+-- the instant of the hover.  When Alt/Shift/Ctrl toggles and the trade-skill
+-- tooltip is still the one on screen, we re-run SetTradeSkillItem for the same
+-- reagent -- our hook above then re-adds (or removes) the location lines for the
+-- new modifier state.  MODIFIER_STATE_CHANGED does not fire while an EditBox
+-- holds focus, but the hover already cleared that focus, so by now it flows.
+if (type (CreateFrame) == "function") then
+	local mf = CreateFrame ("Frame");
+	mf:RegisterEvent ("MODIFIER_STATE_CHANGED");
+	mf:SetScript ("OnEvent", function ()
+		if (GameTooltip == nil or type (GameTooltip.IsShown) ~= "function" or not GameTooltip:IsShown ()) then return; end
+		if (gAtr_TSTip.skill == nil) then return; end
+		if (type (GameTooltip.SetTradeSkillItem) ~= "function") then return; end
+		-- Only if this tooltip is still the trade-skill one we last drew (its owner
+		-- is unchanged), so we never hijack some other tooltip that is now showing.
+		local owner = (GameTooltip.GetOwner) and GameTooltip:GetOwner () or nil;
+		if (owner ~= gAtr_TSTip.owner) then return; end
+		pcall (function ()
+			if (gAtr_TSTip.id) then GameTooltip:SetTradeSkillItem (gAtr_TSTip.skill, gAtr_TSTip.id);
+			else                    GameTooltip:SetTradeSkillItem (gAtr_TSTip.skill); end
+		end);
+	end);
+end
 
 hooksecurefunc (GameTooltip, "SetTradePlayerItem",
 	function (tip, id)
