@@ -2252,6 +2252,18 @@ hooksecurefunc (GameTooltip, "SetTradeSkillItem",
 			num = select (3, GetTradeSkillReagentInfo(skill, id));
 		end
 
+		-- Ascension quirk: GetTradeSkillReagentItemLink (and GetTradeSkillItemLink)
+		-- can return nil for the given skill index -- most reliably reproduced with
+		-- the profession window's search/filter bar active.  That left reagent
+		-- hovers with no price or "Qty/locations" line, even though the reagent's
+		-- own tooltip rendered fine.  This is a hooksecurefunc, so the stock
+		-- SetTradeSkillItem call it follows has ALREADY drawn the item onto the
+		-- tooltip; recover the link straight off the rendered tooltip whenever the
+		-- index-based lookup comes back empty, which is independent of the filter.
+		if (link == nil and tip and tip.GetItem) then
+			link = select (2, tip:GetItem());
+		end
+
 		ShowTipWithPricing (tip, link, num);
 	end
 );
